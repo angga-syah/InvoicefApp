@@ -1,67 +1,33 @@
-# Invoice Management System - Python Dependencies
-# Fixed version compatibility
-
-# GUI Framework
-PyQt6>=6.4.0
-PyQt6-tools>=6.4.2.3.3
-
-# Database & ORM
-SQLAlchemy>=2.0.0
-psycopg2-binary>=2.9.0
-alembic>=1.12.0
-
-# PDF Generation
-reportlab>=4.0.0
-weasyprint>=60.0
-
-# Excel Operations
-openpyxl>=3.1.0
-xlsxwriter>=3.1.0
-pandas>=2.0.0
-
-# Environment & Configuration
-python-dotenv>=1.0.0
-pydantic>=2.4.0
-pydantic-settings>=2.0.0
-
-# Security
-bcrypt>=4.0.0
-cryptography>=41.0.0
-
-# Search & Text Processing
-fuzzywuzzy>=0.18.0
-python-Levenshtein>=0.20.0
-
-# Caching (Optional)
-redis>=5.0.0
-
-# Utilities
-Pillow>=10.0.0
-requests>=2.31.0
-
-# Development & Testing
-pytest>=7.4.0
-pytest-qt>=4.2.0
-black>=23.0.0
-flake8>=6.0.0
-
-# Logging
-structlog>=23.0.0
-
-# Date/Time utilities
-python-dateutil>=2.8.0
-
-# Number to words conversion (Indonesian)
-num2words>=0.5.10
-
-# Icon handling
-QtAwesome>=1.3.0
-
-# Performance monitoring
-psutil>=5.9.0
-
-# File format detection
-python-magic>=0.4.27
-
-# Backup utilities
-schedule>=1.2.0
+# Core GUI Framework
+PyQt6==6.9.0
+PyQt6-tools==6.4.2.3.3
+# Database and ORM
+SQLAlchemy==2.0.41
+psycopg2-binary==2.9.10
+# Data Processing and Analysis
+pandas==2.3.0
+numpy>=2.2.0
+# File Handling
+openpyxl==3.1.5
+# PDF Generation and Reports
+reportlab==4.4.1
+pillow>=11.0.0
+# Web and HTTP
+requests==2.32.3
+# Security and Authentication
+bcrypt==4.3.0
+# Configuration Management
+python-dotenv==1.1.0
+pydantic-settings==2.6.1
+# Text Processing
+num2words==0.5.14
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.25.0
+# Data Validation
+pydantic==2.11.5
+# Caching (Redis)
+redis==6.2.0
+# Build Tools
+setuptools==80.9.0
+# Text Encoding Detection
+chardet>=5.0.0
