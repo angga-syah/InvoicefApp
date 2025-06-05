@@ -1,67 +1,67 @@
 # Invoice Management System - Python Dependencies
-# Core dependencies untuk aplikasi invoice management
+# Fixed version compatibility
 
 # GUI Framework
-PyQt6==6.6.1
-PyQt6-tools==6.6.1
+PyQt6>=6.4.0
+PyQt6-tools>=6.4.2.3.3
 
 # Database & ORM
-SQLAlchemy==2.0.23
-psycopg2-binary==2.9.9
-alembic==1.13.1
+SQLAlchemy>=2.0.0
+psycopg2-binary>=2.9.0
+alembic>=1.12.0
 
 # PDF Generation
-reportlab==4.0.7
-weasyprint==60.2
+reportlab>=4.0.0
+weasyprint>=60.0
 
 # Excel Operations
-openpyxl==3.1.2
-xlsxwriter==3.1.9
-pandas==2.1.4
+openpyxl>=3.1.0
+xlsxwriter>=3.1.0
+pandas>=2.0.0
 
 # Environment & Configuration
-python-dotenv==1.0.0
-pydantic==2.5.2
-pydantic-settings==2.1.0
+python-dotenv>=1.0.0
+pydantic>=2.4.0
+pydantic-settings>=2.0.0
 
 # Security
-bcrypt==4.1.2
-cryptography==41.0.8
+bcrypt>=4.0.0
+cryptography>=41.0.0
 
 # Search & Text Processing
-fuzzywuzzy==0.18.0
-python-Levenshtein==0.23.0
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.20.0
 
 # Caching (Optional)
-redis==5.0.1
+redis>=5.0.0
 
 # Utilities
-Pillow==10.1.0
-requests==2.31.0
+Pillow>=10.0.0
+requests>=2.31.0
 
 # Development & Testing
-pytest==7.4.3
-pytest-qt==4.2.0
-black==23.11.0
-flake8==6.1.0
+pytest>=7.4.0
+pytest-qt>=4.2.0
+black>=23.0.0
+flake8>=6.0.0
 
 # Logging
-structlog==23.2.0
+structlog>=23.0.0
 
 # Date/Time utilities
-python-dateutil==2.8.2
+python-dateutil>=2.8.0
 
 # Number to words conversion (Indonesian)
-num2words==0.5.13
+num2words>=0.5.10
 
 # Icon handling
-QtAwesome==1.3.1
+QtAwesome>=1.3.0
 
 # Performance monitoring
-psutil==5.9.6
+psutil>=5.9.0
 
 # File format detection
-python-magic==0.4.27
+python-magic>=0.4.27
 
 # Backup utilities
-schedule==1.2.0
+schedule>=1.2.0

@@ -1,3 +1,23 @@
+# Invoice Management System - Git Ignore Rules
+
+# ===========================================
+# Environment and Configuration Files
+# ===========================================
+
+# Environment variables (contains sensitive data)
+.env
+.env.local
+.env.production
+.env.development
+
+# Configuration overrides
+config_local.py
+local_settings.py
+
+# ===========================================
+# Python
+# ===========================================
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -152,9 +172,286 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+# ===========================================
+# Database Files
+# ===========================================
+
+# SQLite databases
+*.sqlite
+*.sqlite3
+*.db
+
+# PostgreSQL
+*.sql.backup
+*.dump
+
+# Database migration files (if auto-generated)
+migrations/
+alembic/versions/
+
+# ===========================================
+# Application Specific
+# ===========================================
+
+# Log files
+logs/
+*.log
+log_*.txt
+
+# Backup files
+backups/
+*.backup
+*.bak
+
+# Export files
+exports/
+exported_*.xlsx
+exported_*.pdf
+exported_*.csv
+
+# Cache files
+cache/
+.cache/
+*.cache
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.temp
+
+# User data files (sensitive)
+user_data/
+data/
+uploads/
+
+# ===========================================
+# IDE and Editor Files
+# ===========================================
+
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+#  be added to the global gitignore or merged into this file.  For a global gitignore,
+#  see https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
+.idea/
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# ===========================================
+# Operating System Files
+# ===========================================
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ===========================================
+# Build and Packaging
+# ===========================================
+
+# Build directories
+build/
+dist/
+target/
+
+# Packaging
+*.deb
+*.rpm
+*.pkg
+*.dmg
+*.exe
+*.msi
+*.app
+
+# ===========================================
+# Testing and Coverage
+# ===========================================
+
+# Test results
+test_results/
+test_output/
+*.xml
+
+# Coverage reports
+.coverage
+htmlcov/
+coverage.xml
+
+# ===========================================
+# Documentation
+# ===========================================
+
+# Generated documentation
+docs/_build/
+docs/build/
+site/
+
+# ===========================================
+# Security and Keys
+# ===========================================
+
+# Private keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Certificates
+*.crt
+*.cer
+
+# SSH keys
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+
+# ===========================================
+# Application Runtime
+# ===========================================
+
+# PID files
+*.pid
+
+# Session files
+sessions/
+
+# Lock files
+*.lock
+
+# ===========================================
+# Development Tools
+# ===========================================
+
+# Pre-commit
+.pre-commit-config.yaml
+
+# Profiling
+*.prof
+
+# Benchmarking
+benchmark_results/
+
+# ===========================================
+# Custom Application Files
+# ===========================================
+
+# Invoice attachments (may contain sensitive data)
+attachments/
+
+# User preferences (may contain personal settings)
+user_preferences.json
+settings.json
+
+# Application state
+app_state.json
+window_state.json
+
+# Custom templates (may contain company-specific data)
+custom_templates/
+
+# Reports output
+reports_output/
+
+# Import/Export working directories
+import_temp/
+export_temp/
+
+# Asset cache
+asset_cache/
+
+# ===========================================
+# Docker (if used for deployment)
+# ===========================================
+
+# Docker
+.dockerignore
+Dockerfile.*
+docker-compose.override.yml
+
+# ===========================================
+# Additional Patterns
+# ===========================================
+
+# Compressed files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Office temporary files
+~$*
+
+# Backup files
+*_backup
+*_old
+*.orig
+
+# Local development overrides
+local_*
+dev_*
+
+# Performance monitoring
+performance_*.json
+
+# Error dumps
+error_*.dump
+crash_*.log
