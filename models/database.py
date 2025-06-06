@@ -6,7 +6,7 @@ SQLAlchemy models for all database tables with relationships and business logic.
 import uuid
 from datetime import datetime, date
 from decimal import Decimal
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, Boolean, DateTime, Date, 
     Numeric, ForeignKey, CheckConstraint, UniqueConstraint, Index
@@ -14,7 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, Session
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 from sqlalchemy.pool import QueuePool
 import logging
 
@@ -35,9 +35,11 @@ class UUIDMixin:
     """Mixin for UUID primary keys"""
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        # Add UUID column for each model
-        uuid_column_name = f"{cls.__tablename__.rstrip('s')}_uuid"
-        setattr(cls, uuid_column_name, Column(UUID(as_uuid=True), default=uuid.uuid4, unique=True, nullable=False))
+        # Check if class has __tablename__ attribute before accessing
+        tablename = getattr(cls, '__tablename__', None)
+        if tablename:
+            uuid_column_name = f"{tablename.rstrip('s')}_uuid"
+            setattr(cls, uuid_column_name, Column(UUID(as_uuid=True), default=uuid.uuid4, unique=True, nullable=False))
 
 class User(Base, TimestampMixin, UUIDMixin):
     """User model for authentication and authorization"""
@@ -60,7 +62,11 @@ class User(Base, TimestampMixin, UUIDMixin):
     )
     
     def __repr__(self):
-        return f"<User(id={self.id}, username='{self.username}', role='{self.role}')>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            return f"<User(id={self.id}, username='{safe_string_conversion(self.username)}', role='{safe_string_conversion(self.role)}')>"
+        except Exception:
+            return f"<User(id={getattr(self, 'id', 'unknown')})>"
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -88,7 +94,11 @@ class Company(Base, TimestampMixin, UUIDMixin):
     invoices = relationship("Invoice", back_populates="company")
     
     def __repr__(self):
-        return f"<Company(id={self.id}, name='{self.company_name}', npwp='{self.npwp}')>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            return f"<Company(id={self.id}, name='{safe_string_conversion(self.company_name)}', npwp='{safe_string_conversion(self.npwp)}')>"
+        except Exception:
+            return f"<Company(id={getattr(self, 'id', 'unknown')})>"
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -123,7 +133,11 @@ class TkaWorker(Base, TimestampMixin, UUIDMixin):
     )
     
     def __repr__(self):
-        return f"<TkaWorker(id={self.id}, nama='{self.nama}', passport='{self.passport}')>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            return f"<TkaWorker(id={self.id}, nama='{safe_string_conversion(self.nama)}', passport='{safe_string_conversion(self.passport)}')>"
+        except Exception:
+            return f"<TkaWorker(id={getattr(self, 'id', 'unknown')})>"
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -159,7 +173,11 @@ class TkaFamilyMember(Base, TimestampMixin, UUIDMixin):
     )
     
     def __repr__(self):
-        return f"<TkaFamilyMember(id={self.id}, nama='{self.nama}', relationship='{self.relationship}')>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            return f"<TkaFamilyMember(id={self.id}, nama='{safe_string_conversion(self.nama)}', relationship='{safe_string_conversion(self.relationship)}')>"
+        except Exception:
+            return f"<TkaFamilyMember(id={getattr(self, 'id', 'unknown')})>"
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -195,7 +213,20 @@ class JobDescription(Base, TimestampMixin, UUIDMixin):
     )
     
     def __repr__(self):
-        return f"<JobDescription(id={self.id}, name='{self.job_name}', price={self.price})>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            price_str = safe_string_conversion(self.price)
+            return f"<JobDescription(id={self.id}, name='{safe_string_conversion(self.job_name)}', price={price_str})>"
+        except Exception:
+            return f"<JobDescription(id={getattr(self, 'id', 'unknown')})>"
+    
+    def get_price_as_float(self) -> float:
+        """Safe method to get price as float"""
+        try:
+            # Use safe conversion instead of direct float() call
+            return safe_float_conversion(self.price, 0.0)
+        except Exception:
+            return 0.0
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -203,7 +234,7 @@ class JobDescription(Base, TimestampMixin, UUIDMixin):
             'company_id': self.company_id,
             'job_name': self.job_name,
             'job_description': self.job_description,
-            'price': float(self.price),
+            'price': self.get_price_as_float(),
             'is_active': self.is_active,
             'sort_order': self.sort_order,
             'company_name': self.company.company_name if self.company else None
@@ -225,7 +256,11 @@ class BankAccount(Base, TimestampMixin, UUIDMixin):
     invoices = relationship("Invoice", back_populates="bank_account")
     
     def __repr__(self):
-        return f"<BankAccount(id={self.id}, bank='{self.bank_name}', account='{self.account_number}')>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            return f"<BankAccount(id={self.id}, bank='{safe_string_conversion(self.bank_name)}', account='{safe_string_conversion(self.account_number)}')>"
+        except Exception:
+            return f"<BankAccount(id={getattr(self, 'id', 'unknown')})>"
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -272,38 +307,79 @@ class Invoice(Base, TimestampMixin, UUIDMixin):
     )
     
     def __repr__(self):
-        return f"<Invoice(id={self.id}, number='{self.invoice_number}', total={self.total_amount})>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            return f"<Invoice(id={self.id}, number='{safe_string_conversion(self.invoice_number)}', total={safe_string_conversion(self.total_amount)})>"
+        except Exception:
+            return f"<Invoice(id={getattr(self, 'id', 'unknown')})>"
     
-    def calculate_totals(self):
-        """Calculate invoice totals based on line items"""
-        self.subtotal = sum(line.line_total for line in self.lines)
+    def get_subtotal_as_decimal(self) -> Decimal:
+        """Safe method to get subtotal as Decimal"""
+        return safe_decimal_conversion(self.subtotal, Decimal('0'))
+    
+    def get_vat_percentage_as_decimal(self) -> Decimal:
+        """Safe method to get VAT percentage as Decimal"""
+        return safe_decimal_conversion(self.vat_percentage, Decimal('11.00'))
+    
+    def get_vat_amount_as_decimal(self) -> Decimal:
+        """Safe method to get VAT amount as Decimal"""
+        return safe_decimal_conversion(self.vat_amount, Decimal('0'))
+    
+    def get_total_amount_as_decimal(self) -> Decimal:
+        """Safe method to get total amount as Decimal"""
+        return safe_decimal_conversion(self.total_amount, Decimal('0'))
+    
+    def calculate_totals(self) -> Dict[str, Decimal]:
+        """Calculate invoice totals based on line items - returns calculated values"""
+        # Calculate subtotal as sum of line totals
+        line_total_sum = Decimal('0')
+        for line in self.lines:
+            line_total = line.get_line_total_as_decimal()
+            line_total_sum += line_total
+        
+        # Get VAT percentage safely
+        vat_percentage_decimal = self.get_vat_percentage_as_decimal()
         
         # Apply special PPN rounding rule
-        vat_raw = self.subtotal * self.vat_percentage / 100
+        vat_raw = line_total_sum * vat_percentage_decimal / 100
         decimal_part = vat_raw - int(vat_raw)
         
-        if abs(decimal_part - 0.49) < 0.001:  # .49 rule
-            self.vat_amount = int(vat_raw)
-        elif decimal_part >= 0.50:  # .50 and above rule
-            self.vat_amount = int(vat_raw) + 1
+        if abs(decimal_part - Decimal('0.49')) < Decimal('0.001'):  # .49 rule
+            vat_amount_calculated = Decimal(str(int(vat_raw)))
+        elif decimal_part >= Decimal('0.50'):  # .50 and above rule
+            vat_amount_calculated = Decimal(str(int(vat_raw) + 1))
         else:
-            self.vat_amount = round(vat_raw, 0)
+            vat_amount_calculated = Decimal(str(round(vat_raw, 0)))
         
-        self.total_amount = self.subtotal + self.vat_amount
+        total_amount_calculated = line_total_sum + vat_amount_calculated
+        
+        return {
+            'subtotal': line_total_sum,
+            'vat_amount': vat_amount_calculated,
+            'total_amount': total_amount_calculated
+        }
     
     def to_dict(self) -> Dict[str, Any]:
+        # Safe conversion for invoice date
+        invoice_date_str = None
+        if self.invoice_date is not None:
+            try:
+                invoice_date_str = self.invoice_date.isoformat()
+            except (AttributeError, ValueError):
+                invoice_date_str = str(self.invoice_date)
+        
         return {
             'id': self.id,
             'invoice_number': self.invoice_number,
             'company_id': self.company_id,
-            'invoice_date': self.invoice_date.isoformat() if self.invoice_date else None,
-            'subtotal': float(self.subtotal),
-            'vat_percentage': float(self.vat_percentage),
-            'vat_amount': float(self.vat_amount),
-            'total_amount': float(self.total_amount),
+            'invoice_date': invoice_date_str,
+            'subtotal': safe_float_conversion(self.get_subtotal_as_decimal()),
+            'vat_percentage': safe_float_conversion(self.get_vat_percentage_as_decimal()),
+            'vat_amount': safe_float_conversion(self.get_vat_amount_as_decimal()),
+            'total_amount': safe_float_conversion(self.get_total_amount_as_decimal()),
             'status': self.status,
             'notes': self.notes,
-            'printed_count': self.printed_count,
+            'printed_count': safe_int_conversion(self.printed_count),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'company_name': self.company.company_name if self.company else None,
             'creator_name': self.creator.full_name if self.creator else None,
@@ -338,13 +414,49 @@ class InvoiceLine(Base, TimestampMixin, UUIDMixin):
     )
     
     def __repr__(self):
-        return f"<InvoiceLine(id={self.id}, baris={self.baris}, total={self.line_total})>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            return f"<InvoiceLine(id={self.id}, baris={safe_string_conversion(self.baris)}, total={safe_string_conversion(self.line_total)})>"
+        except Exception:
+            return f"<InvoiceLine(id={getattr(self, 'id', 'unknown')})>"
     
-    def calculate_line_total(self):
+    def get_quantity_as_int(self) -> int:
+        """Safe method to get quantity as int"""
+        return safe_int_conversion(self.quantity, 1)
+    
+    def get_unit_price_as_decimal(self) -> Decimal:
+        """Safe method to get unit price as Decimal"""
+        return safe_decimal_conversion(self.unit_price, Decimal('0'))
+    
+    def get_line_total_as_decimal(self) -> Decimal:
+        """Safe method to get line total as Decimal"""
+        return safe_decimal_conversion(self.line_total, Decimal('0'))
+    
+    def get_custom_price_as_decimal(self) -> Optional[Decimal]:
+        """Safe method to get custom price as Decimal"""
+        if self.custom_price is None:
+            return None
+        try:
+            # Handle SQLAlchemy column values properly
+            if hasattr(self.custom_price, '__float__'):
+                return Decimal(str(float(self.custom_price)))
+            elif hasattr(self.custom_price, '__str__'):
+                return Decimal(str(self.custom_price))
+            else:
+                return Decimal(str(self.custom_price))
+        except (ValueError, TypeError, AttributeError):
+            return None
+    
+    def calculate_line_total(self) -> Decimal:
         """Calculate line total based on quantity and unit price"""
-        self.line_total = self.quantity * self.unit_price
+        quantity_decimal = Decimal(str(self.get_quantity_as_int()))
+        unit_price_decimal = self.get_unit_price_as_decimal()
+        return quantity_decimal * unit_price_decimal
     
     def to_dict(self) -> Dict[str, Any]:
+        custom_price_value = self.get_custom_price_as_decimal()
+        custom_price_float = safe_float_conversion(custom_price_value) if custom_price_value is not None else None
+        
         return {
             'id': self.id,
             'invoice_id': self.invoice_id,
@@ -354,10 +466,10 @@ class InvoiceLine(Base, TimestampMixin, UUIDMixin):
             'job_description_id': self.job_description_id,
             'custom_job_name': self.custom_job_name,
             'custom_job_description': self.custom_job_description,
-            'custom_price': float(self.custom_price) if self.custom_price else None,
-            'quantity': self.quantity,
-            'unit_price': float(self.unit_price),
-            'line_total': float(self.line_total),
+            'custom_price': custom_price_float,
+            'quantity': self.get_quantity_as_int(),
+            'unit_price': safe_float_conversion(self.get_unit_price_as_decimal()),
+            'line_total': safe_float_conversion(self.get_line_total_as_decimal()),
             'tka_worker_name': self.tka_worker.nama if self.tka_worker else None,
             'job_name': self.custom_job_name or (self.job_description.job_name if self.job_description else None)
         }
@@ -378,18 +490,35 @@ class Setting(Base, TimestampMixin):
     updated_by_user = relationship("User", back_populates="settings_updates")
     
     def __repr__(self):
-        return f"<Setting(key='{self.setting_key}', value='{self.setting_value}')>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            return f"<Setting(key='{safe_string_conversion(self.setting_key)}', value='{safe_string_conversion(self.setting_value)}')>"
+        except Exception:
+            return f"<Setting(id={getattr(self, 'id', 'unknown')})>"
     
     def get_typed_value(self):
         """Get setting value with proper type conversion"""
-        if self.setting_type == 'integer':
-            return int(self.setting_value)
-        elif self.setting_type == 'decimal':
-            return Decimal(self.setting_value)
-        elif self.setting_type == 'boolean':
-            return self.setting_value.lower() in ('true', '1', 'yes')
+        # Safe check for setting_value
+        if not safe_bool_check(self.setting_value):
+            return None
+            
+        setting_value_str = safe_string_conversion(self.setting_value)
+        setting_type_str = safe_string_conversion(self.setting_type, 'string')
+        
+        if setting_type_str == 'integer':
+            try:
+                return safe_int_conversion(setting_value_str, 0)
+            except Exception:
+                return 0
+        elif setting_type_str == 'decimal':
+            try:
+                return safe_decimal_conversion(setting_value_str, Decimal('0'))
+            except Exception:
+                return Decimal('0')
+        elif setting_type_str == 'boolean':
+            return setting_value_str.lower() in ('true', '1', 'yes')
         else:
-            return self.setting_value
+            return setting_value_str
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -420,7 +549,11 @@ class UserPreference(Base, TimestampMixin):
     )
     
     def __repr__(self):
-        return f"<UserPreference(user_id={self.user_id}, key='{self.preference_key}')>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            return f"<UserPreference(user_id={safe_string_conversion(self.user_id)}, key='{safe_string_conversion(self.preference_key)}')>"
+        except Exception:
+            return f"<UserPreference(id={getattr(self, 'id', 'unknown')})>"
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -448,17 +581,102 @@ class InvoiceNumberSequence(Base, TimestampMixin):
     )
     
     def __repr__(self):
-        return f"<InvoiceNumberSequence(year={self.year}, month={self.month}, current={self.current_number})>"
+        # Safe string representation to avoid Column callable issues
+        try:
+            return f"<InvoiceNumberSequence(year={safe_string_conversion(self.year)}, month={safe_string_conversion(self.month)}, current={safe_string_conversion(self.current_number)})>"
+        except Exception:
+            return f"<InvoiceNumberSequence(id={getattr(self, 'id', 'unknown')})>"
+    
+    def get_current_number_as_int(self) -> int:
+        """Safe method to get current number as int"""
+        return safe_int_conversion(self.current_number, 0)
     
     def to_dict(self) -> Dict[str, Any]:
         return {
             'id': self.id,
             'year': self.year,
             'month': self.month,
-            'current_number': self.current_number,
-            'prefix': self.prefix,
-            'suffix': self.suffix
+            'current_number': self.get_current_number_as_int(),
+            'prefix': safe_string_conversion(self.prefix),
+            'suffix': safe_string_conversion(self.suffix)
         }
+
+# Helper functions for safe value access and conversion
+def safe_get_column_value(instance: Any, column_name: str, default: Any = None) -> Any:
+    """Safely get column value from SQLAlchemy instance"""
+    try:
+        value = getattr(instance, column_name, default)
+        return value if value is not None else default
+    except Exception:
+        return default
+
+def safe_decimal_conversion(value: Any, default: Decimal = Decimal('0')) -> Decimal:
+    """Safely convert value to Decimal"""
+    if value is None:
+        return default
+    try:
+        # Handle SQLAlchemy column values properly
+        if hasattr(value, '__float__'):
+            # Try to get the actual value if it's a SQLAlchemy result
+            return Decimal(str(float(value)))
+        elif hasattr(value, '__str__'):
+            return Decimal(str(value))
+        else:
+            return Decimal(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return default
+
+def safe_float_conversion(value: Any, default: float = 0.0) -> float:
+    """Safely convert value to float"""
+    if value is None:
+        return default
+    try:
+        # Handle SQLAlchemy column values properly
+        if hasattr(value, '__float__'):
+            return float(value)
+        elif isinstance(value, (int, float, Decimal)):
+            return float(value)
+        else:
+            return float(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return default
+
+def safe_int_conversion(value: Any, default: int = 0) -> int:
+    """Safely convert value to int"""
+    if value is None:
+        return default
+    try:
+        # Handle SQLAlchemy column values properly
+        if hasattr(value, '__int__'):
+            return int(value)
+        elif isinstance(value, (int, float, str)):
+            return int(float(value))  # Convert via float to handle decimal strings
+        else:
+            return int(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return default
+
+def safe_string_conversion(value: Any, default: str = "") -> str:
+    """Safely convert value to string"""
+    if value is None:
+        return default
+    try:
+        return str(value)
+    except (ValueError, TypeError, AttributeError):
+        return default
+
+def safe_bool_check(value: Any) -> bool:
+    """Safely check if value is truthy without triggering SQLAlchemy __bool__ issues"""
+    if value is None:
+        return False
+    try:
+        # For SQLAlchemy columns, check if it's not None instead of boolean conversion
+        if hasattr(value, '__table__') or hasattr(value, '_sa_class_manager'):
+            return value is not None
+        # For regular values, use standard truthiness
+        return bool(value)
+    except Exception:
+        return False
 
 # Database connection and session management
 class DatabaseManager:
@@ -508,6 +726,8 @@ class DatabaseManager:
     def get_session(self) -> Session:
         """Get a new database session"""
         try:
+            if self.SessionLocal is None:
+                raise RuntimeError("Database not initialized")
             return self.SessionLocal()
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
@@ -516,20 +736,25 @@ class DatabaseManager:
     def close_session(self, session: Session):
         """Close database session"""
         try:
-            session.close()
+            if session:
+                session.close()
         except Exception as e:
             logger.error(f"Error closing session: {e}")
     
     def test_connection(self) -> bool:
         """Test database connection"""
+        session = None
         try:
             session = self.get_session()
-            session.execute("SELECT 1")
-            session.close()
+            # Use text() for raw SQL to avoid type issues
+            session.execute(text("SELECT 1"))
             return True
         except Exception as e:
             logger.error(f"Database connection test failed: {e}")
             return False
+        finally:
+            if session:
+                self.close_session(session)
 
 # Global database manager instance
 db_manager = DatabaseManager()

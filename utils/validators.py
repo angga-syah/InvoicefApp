@@ -50,7 +50,7 @@ def clean_string(value: Any) -> str:
 
 class ValidationError(Exception):
     """Custom exception for validation errors"""
-    def __init__(self, message: str, field: str = None, code: str = None):
+    def __init__(self, message: str, field: Optional[str] = None, code: Optional[str] = None):
         self.message = message
         self.field = field
         self.code = code
@@ -63,7 +63,7 @@ class ValidationResult:
         self.errors: List[Dict[str, str]] = []
         self.warnings: List[Dict[str, str]] = []
     
-    def add_error(self, message: str, field: str = None, code: str = None):
+    def add_error(self, message: str, field: Optional[str] = None, code: Optional[str] = None):
         """Add validation error"""
         self.is_valid = False
         self.errors.append({
@@ -72,7 +72,7 @@ class ValidationResult:
             'code': code or ""
         })
     
-    def add_warning(self, message: str, field: str = None, code: str = None):
+    def add_warning(self, message: str, field: Optional[str] = None, code: Optional[str] = None):
         """Add validation warning"""
         self.warnings.append({
             'message': message,
@@ -99,7 +99,7 @@ def validate_required(value: Any, field_name: str = "Field") -> ValidationResult
     
     return result
 
-def validate_string_length(value: str, min_length: int = 0, max_length: int = None, 
+def validate_string_length(value: str, min_length: int = 0, max_length: Optional[int] = None, 
                           field_name: str = "Field") -> ValidationResult:
     """Validate string length constraints"""
     result = ValidationResult()
@@ -551,7 +551,7 @@ def validate_invoice_line_data(line_data: Dict[str, Any]) -> ValidationResult:
     result = ValidationResult()
     
     # Required fields
-    required_fields = ['invoice_id', 'tka_id', 'job_description_id', 'unit_price', 'quantity']
+    required_fields = ['tka_id', 'job_description_id', 'unit_price', 'quantity']
     for field in required_fields:
         field_result = validate_required(line_data.get(field), field.replace('_', ' ').title())
         if not field_result.is_valid:

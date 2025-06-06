@@ -9,7 +9,7 @@ import uuid
 import json
 from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 from pathlib import Path
 import logging
 
@@ -165,7 +165,7 @@ def format_date_indonesian(date_value: date) -> str:
     
     return f"{date_value.day} {months[date_value.month - 1]} {date_value.year}"
 
-def get_date_range(period: str) -> tuple:
+def get_date_range(period: str) -> Tuple[date, date]:
     """Get date range for common periods"""
     today = date.today()
     
@@ -433,7 +433,7 @@ def retry_on_failure(func, max_retries: int = 3, delay: float = 1.0):
 
 # ========== LOGGING UTILITIES ==========
 
-def log_function_call(func_name: str, args: tuple = None, kwargs: dict = None):
+def log_function_call(func_name: str, args: Optional[Tuple] = None, kwargs: Optional[Dict] = None):
     """Log function call with parameters"""
     args_str = str(args) if args else ""
     kwargs_str = str(kwargs) if kwargs else ""

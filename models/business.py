@@ -10,10 +10,14 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func, desc, text
 import logging
+import io
+import csv
 
 from models.database import (
     User, Company, TkaWorker, TkaFamilyMember, JobDescription, 
-    Invoice, InvoiceLine, BankAccount, Setting, InvoiceNumberSequence
+    Invoice, InvoiceLine, BankAccount, Setting, InvoiceNumberSequence,
+    safe_decimal_conversion, safe_float_conversion, safe_int_conversion,
+    safe_string_conversion, safe_bool_check
 )
 from utils.helpers import safe_decimal, fuzzy_search_score
 from utils.validators import ValidationResult
@@ -23,9 +27,9 @@ logger = logging.getLogger(__name__)
 
 class BusinessError(Exception):
     """Custom exception for business logic errors"""
-    def __init__(self, message: str, code: str = None, details: Dict = None):
+    def __init__(self, message: str, code: Optional[str] = None, details: Optional[Dict] = None):
         self.message = message
-        self.code = code
+        self.code = code or "BUSINESS_ERROR"
         self.details = details or {}
         super().__init__(message)
 
@@ -41,7 +45,11 @@ class InvoiceBusinessLogic:
         - .49 rounds down (18.000,49 → 18.000)
         - .50 rounds up (18.000,50 → 18.001)
         """
-        vat_raw = subtotal * vat_percentage / 100
+        # Ensure we have proper Decimal values
+        subtotal_decimal = safe_decimal(subtotal)
+        vat_percentage_decimal = safe_decimal(vat_percentage)
+        
+        vat_raw = subtotal_decimal * vat_percentage_decimal / 100
         decimal_part = vat_raw - vat_raw.quantize(Decimal('1'))
         
         if abs(decimal_part - Decimal('0.49')) < Decimal('0.001'):
@@ -56,8 +64,17 @@ class InvoiceBusinessLogic:
     
     def calculate_invoice_totals(self, invoice: Invoice) -> Dict[str, Decimal]:
         """Calculate all invoice totals"""
-        subtotal = sum(line.line_total for line in invoice.lines)
-        vat_amount = self.calculate_vat_amount(subtotal, invoice.vat_percentage)
+        # Calculate subtotal from invoice lines
+        subtotal = Decimal('0')
+        for line in invoice.lines:
+            line_total = line.get_line_total_as_decimal()
+            subtotal += line_total
+        
+        # Get VAT percentage safely
+        vat_percentage = invoice.get_vat_percentage_as_decimal()
+        
+        # Calculate VAT amount
+        vat_amount = self.calculate_vat_amount(subtotal, vat_percentage)
         total_amount = subtotal + vat_amount
         
         return {
@@ -69,11 +86,14 @@ class InvoiceBusinessLogic:
     def update_invoice_totals(self, invoice: Invoice) -> None:
         """Update invoice totals based on line items"""
         totals = self.calculate_invoice_totals(invoice)
-        invoice.subtotal = totals['subtotal']
-        invoice.vat_amount = totals['vat_amount']
-        invoice.total_amount = totals['total_amount']
+        
+        # Manual assignment to avoid SQLAlchemy type issues
+        # These values will be converted by SQLAlchemy when saving
+        invoice.subtotal = totals['subtotal']  # type: ignore
+        invoice.vat_amount = totals['vat_amount']  # type: ignore
+        invoice.total_amount = totals['total_amount']  # type: ignore
     
-    def generate_invoice_number(self, invoice_date: date = None) -> str:
+    def generate_invoice_number(self, invoice_date: Optional[date] = None) -> str:
         """Generate next invoice number with format INV-YY-MM-NNN"""
         if invoice_date is None:
             invoice_date = date.today()
@@ -98,11 +118,13 @@ class InvoiceBusinessLogic:
             )
             self.session.add(sequence)
         
-        # Increment sequence
-        sequence.current_number += 1
+        # Increment sequence safely
+        current_num = sequence.get_current_number_as_int()
+        new_current_num = current_num + 1
+        sequence.current_number = new_current_num  # type: ignore
         
-        # Generate invoice number
-        invoice_number = format_invoice_number(year, month, sequence.current_number)
+        # Generate invoice number using the integer value
+        invoice_number = format_invoice_number(year, month, new_current_num)
         
         # Check for collisions (safety measure)
         existing = self.session.query(Invoice).filter(
@@ -111,8 +133,9 @@ class InvoiceBusinessLogic:
         
         if existing:
             # If collision exists, increment and try again
-            sequence.current_number += 1
-            invoice_number = format_invoice_number(year, month, sequence.current_number)
+            new_current_num += 1
+            sequence.current_number = new_current_num  # type: ignore
+            invoice_number = format_invoice_number(year, month, new_current_num)
         
         return invoice_number
     
@@ -129,13 +152,15 @@ class InvoiceBusinessLogic:
     
     def can_edit_invoice(self, invoice: Invoice) -> bool:
         """Check if invoice can be edited"""
-        # Can edit draft and finalized invoices
-        return invoice.status in ['draft', 'finalized']
+        # Safe status check
+        status = safe_string_conversion(invoice.status)
+        return status in ['draft', 'finalized']
     
     def can_delete_invoice(self, invoice: Invoice) -> bool:
         """Check if invoice can be deleted"""
-        # Can delete draft and finalized invoices
-        return invoice.status in ['draft', 'finalized']
+        # Safe status check
+        status = safe_string_conversion(invoice.status)
+        return status in ['draft', 'finalized']
     
     def validate_tka_assignment(self, tka_id: int, company_id: int) -> bool:
         """Validate if TKA can be assigned to company (through invoice history)"""
@@ -172,14 +197,17 @@ class SearchHelper:
                 Company.is_active == True
             ).order_by(Company.company_name).limit(limit).all()
         
+        # Build filter conditions manually to avoid SQLAlchemy type issues
+        query_pattern = f'{query}%'
+        
         # Exact and prefix matches first
         exact_results = self.session.query(Company).filter(
             and_(
                 Company.is_active == True,
                 or_(
-                    Company.company_name.ilike(f'{query}%'),
-                    Company.npwp.like(f'{query}%'),
-                    Company.idtku.ilike(f'{query}%')
+                    Company.company_name.ilike(query_pattern),
+                    Company.npwp.like(query_pattern),
+                    Company.idtku.ilike(query_pattern)
                 )
             )
         ).order_by(Company.company_name).limit(limit // 2).all()
@@ -190,20 +218,26 @@ class SearchHelper:
             
             # Get companies not in exact results
             exact_ids = [c.id for c in exact_results]
+            filter_condition = Company.is_active == True
+            if exact_ids:
+                filter_condition = and_(filter_condition, ~Company.id.in_(exact_ids))
+                
             fuzzy_candidates = self.session.query(Company).filter(
-                and_(
-                    Company.is_active == True,
-                    ~Company.id.in_(exact_ids) if exact_ids else True
-                )
+                filter_condition
             ).all()
             
             # Score and sort fuzzy results
             scored_results = []
             for company in fuzzy_candidates:
+                # Safe string conversion for fuzzy search
+                company_name = safe_string_conversion(company.company_name)
+                npwp = safe_string_conversion(company.npwp)
+                idtku = safe_string_conversion(company.idtku)
+                
                 score = max(
-                    fuzzy_search_score(query, company.company_name),
-                    fuzzy_search_score(query, company.npwp),
-                    fuzzy_search_score(query, company.idtku)
+                    fuzzy_search_score(query, company_name),
+                    fuzzy_search_score(query, npwp),
+                    fuzzy_search_score(query, idtku)
                 )
                 if score > 0.3:  # Minimum relevance threshold
                     scored_results.append((score, company))
@@ -229,16 +263,34 @@ class SearchHelper:
             
             return workers + family
         
-        # Search workers
-        worker_results = self.session.query(TkaWorker).filter(
-            and_(
-                TkaWorker.is_active == True,
-                or_(
-                    TkaWorker.nama.ilike(f'%{query}%'),
-                    TkaWorker.passport.ilike(f'%{query}%'),
-                    TkaWorker.divisi.ilike(f'%{query}%')
+        # Search workers with pattern matching
+        query_pattern = f'%{query}%'
+        
+        # Build conditions for worker search
+        worker_conditions = [
+            TkaWorker.is_active == True,
+            or_(
+                TkaWorker.nama.ilike(query_pattern),
+                TkaWorker.passport.ilike(query_pattern)
+            )
+        ]
+        
+        # Add division condition only if the column has value
+        # Using a subquery to check for non-null/non-empty division
+        worker_conditions.append(
+            or_(
+                TkaWorker.nama.ilike(query_pattern),
+                TkaWorker.passport.ilike(query_pattern),
+                and_(
+                    TkaWorker.divisi.isnot(None),
+                    TkaWorker.divisi != '',
+                    TkaWorker.divisi.ilike(query_pattern)
                 )
             )
+        )
+        
+        worker_results = self.session.query(TkaWorker).filter(
+            and_(TkaWorker.is_active == True, worker_conditions[-1])
         ).order_by(TkaWorker.nama).limit(limit // 2).all()
         
         # Search family members
@@ -246,8 +298,8 @@ class SearchHelper:
             and_(
                 TkaFamilyMember.is_active == True,
                 or_(
-                    TkaFamilyMember.nama.ilike(f'%{query}%'),
-                    TkaFamilyMember.passport.ilike(f'%{query}%')
+                    TkaFamilyMember.nama.ilike(query_pattern),
+                    TkaFamilyMember.passport.ilike(query_pattern)
                 )
             )
         ).order_by(TkaFamilyMember.nama).limit(limit // 2).all()
@@ -261,11 +313,13 @@ class SearchHelper:
                 desc(Invoice.invoice_date), desc(Invoice.created_at)
             ).limit(limit).all()
         
+        query_pattern = f'%{query}%'
+        
         return self.session.query(Invoice).join(Company).filter(
             or_(
-                Invoice.invoice_number.ilike(f'%{query}%'),
-                Company.company_name.ilike(f'%{query}%'),
-                Company.npwp.like(f'%{query}%')
+                Invoice.invoice_number.ilike(query_pattern),
+                Company.company_name.ilike(query_pattern),
+                Company.npwp.like(query_pattern)
             )
         ).order_by(
             desc(Invoice.invoice_date), desc(Invoice.created_at)
@@ -334,13 +388,32 @@ class DataHelper:
             func.extract('year', Invoice.invoice_date) == current_year
         ).group_by(func.extract('month', Invoice.invoice_date)).all()
         
+        # Convert query results to dictionaries safely
+        status_counts_dict = {}
+        for status, count in status_counts:
+            status_str = safe_string_conversion(status)
+            count_int = safe_int_conversion(count)
+            status_counts_dict[status_str] = count_int
+            
+        status_amounts_dict = {}
+        for status, amount in status_amounts:
+            status_str = safe_string_conversion(status)
+            amount_float = safe_float_conversion(amount)
+            status_amounts_dict[status_str] = amount_float
+            
+        monthly_totals_dict = {}
+        for month, total in monthly_totals:
+            month_int = safe_int_conversion(month)
+            total_float = safe_float_conversion(total)
+            monthly_totals_dict[month_int] = total_float
+        
         return {
-            'status_counts': dict(status_counts),
-            'status_amounts': dict(status_amounts),
-            'monthly_totals': dict(monthly_totals)
+            'status_counts': status_counts_dict,
+            'status_amounts': status_amounts_dict,
+            'monthly_totals': monthly_totals_dict
         }
     
-    def check_duplicate_passport(self, passport: str, exclude_id: int = None) -> bool:
+    def check_duplicate_passport(self, passport: str, exclude_id: Optional[int] = None) -> bool:
         """Check if passport number already exists"""
         query = self.session.query(TkaWorker).filter(
             TkaWorker.passport == passport
@@ -360,7 +433,7 @@ class DataHelper:
         
         return worker_exists or family_exists
     
-    def check_duplicate_npwp(self, npwp: str, exclude_id: int = None) -> bool:
+    def check_duplicate_npwp(self, npwp: str, exclude_id: Optional[int] = None) -> bool:
         """Check if NPWP already exists"""
         query = self.session.query(Company).filter(
             Company.npwp == npwp
@@ -371,7 +444,7 @@ class DataHelper:
         
         return query.first() is not None
     
-    def check_duplicate_idtku(self, idtku: str, exclude_id: int = None) -> bool:
+    def check_duplicate_idtku(self, idtku: str, exclude_id: Optional[int] = None) -> bool:
         """Check if IDTKU already exists"""
         query = self.session.query(Company).filter(
             Company.idtku == idtku
@@ -389,7 +462,7 @@ class ValidationHelper:
         self.session = session
         self.data_helper = DataHelper(session)
     
-    def validate_unique_passport(self, passport: str, exclude_id: int = None) -> ValidationResult:
+    def validate_unique_passport(self, passport: str, exclude_id: Optional[int] = None) -> ValidationResult:
         """Validate passport uniqueness"""
         result = ValidationResult()
         
@@ -402,7 +475,7 @@ class ValidationHelper:
         
         return result
     
-    def validate_unique_npwp(self, npwp: str, exclude_id: int = None) -> ValidationResult:
+    def validate_unique_npwp(self, npwp: str, exclude_id: Optional[int] = None) -> ValidationResult:
         """Validate NPWP uniqueness"""
         result = ValidationResult()
         
@@ -415,7 +488,7 @@ class ValidationHelper:
         
         return result
     
-    def validate_unique_idtku(self, idtku: str, exclude_id: int = None) -> ValidationResult:
+    def validate_unique_idtku(self, idtku: str, exclude_id: Optional[int] = None) -> ValidationResult:
         """Validate IDTKU uniqueness"""
         result = ValidationResult()
         
@@ -482,15 +555,15 @@ class SettingsHelper:
         
         return default
     
-    def set_setting(self, key: str, value: Any, user_id: int = None) -> None:
+    def set_setting(self, key: str, value: Any, user_id: Optional[int] = None) -> None:
         """Set setting value"""
         setting = self.session.query(Setting).filter(
             Setting.setting_key == key
         ).first()
         
         if setting:
-            setting.setting_value = str(value)
-            setting.updated_by = user_id
+            setting.setting_value = str(value)  # type: ignore
+            setting.updated_by = user_id  # type: ignore
         else:
             setting = Setting(
                 setting_key=key,
@@ -504,15 +577,18 @@ class SettingsHelper:
     
     def get_default_vat_percentage(self) -> Decimal:
         """Get default VAT percentage"""
-        return Decimal(str(self.get_setting('default_vat_percentage', '11.00')))
+        vat_setting = self.get_setting('default_vat_percentage', '11.00')
+        return safe_decimal(vat_setting)
     
     def get_invoice_number_format(self) -> str:
         """Get invoice number format"""
-        return self.get_setting('invoice_number_format', 'INV-{YY}-{MM}-{NNN}')
+        format_setting = self.get_setting('invoice_number_format', 'INV-{YY}-{MM}-{NNN}')
+        return safe_string_conversion(format_setting)
     
     def get_company_tagline(self) -> str:
         """Get company tagline"""
-        return self.get_setting('company_tagline', 'Spirit of Services')
+        tagline_setting = self.get_setting('company_tagline', 'Spirit of Services')
+        return safe_string_conversion(tagline_setting)
 
 class ReportHelper:
     """Helper class for report generation"""
@@ -520,8 +596,8 @@ class ReportHelper:
     def __init__(self, session: Session):
         self.session = session
     
-    def get_invoice_report_data(self, start_date: date = None, end_date: date = None,
-                              company_ids: List[int] = None, status: str = None) -> List[Dict]:
+    def get_invoice_report_data(self, start_date: Optional[date] = None, end_date: Optional[date] = None,
+                              company_ids: Optional[List[int]] = None, status: Optional[str] = None) -> List[Dict]:
         """Get invoice data for reports"""
         query = self.session.query(Invoice).join(Company)
         
@@ -542,7 +618,7 @@ class ReportHelper:
         
         return [invoice.to_dict() for invoice in invoices]
     
-    def get_company_summary(self, company_id: int, year: int = None) -> Dict:
+    def get_company_summary(self, company_id: int, year: Optional[int] = None) -> Dict:
         """Get summary for a specific company"""
         query = self.session.query(Invoice).filter(
             Invoice.company_id == company_id
@@ -555,19 +631,116 @@ class ReportHelper:
         
         invoices = query.all()
         
-        total_amount = sum(inv.total_amount for inv in invoices)
+        total_amount = Decimal('0')
+        for inv in invoices:
+            inv_total = inv.get_total_amount_as_decimal()
+            total_amount += inv_total
+        
         total_count = len(invoices)
         status_breakdown = {}
         
         for inv in invoices:
-            status_breakdown[inv.status] = status_breakdown.get(inv.status, 0) + 1
+            status_str = safe_string_conversion(inv.status)
+            status_breakdown[status_str] = status_breakdown.get(status_str, 0) + 1
         
         return {
-            'total_amount': total_amount,
+            'total_amount': float(total_amount),
             'total_count': total_count,
             'status_breakdown': status_breakdown,
             'invoices': [inv.to_dict() for inv in invoices]
         }
+
+class CSVHelper:
+    """Helper class for CSV operations with proper type handling"""
+    
+    def __init__(self, session: Session):
+        self.session = session
+    
+    def export_companies_csv(self) -> str:
+        """Export companies to CSV format"""
+        companies = self.session.query(Company).filter(
+            Company.is_active == True
+        ).all()
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow(['ID', 'Company Name', 'NPWP', 'IDTKU', 'Address'])
+        
+        # Write data with safe string conversion
+        for company in companies:
+            writer.writerow([
+                safe_string_conversion(company.id),
+                safe_string_conversion(company.company_name),
+                safe_string_conversion(company.npwp),
+                safe_string_conversion(company.idtku),
+                safe_string_conversion(company.address)
+            ])
+        
+        return output.getvalue()
+    
+    def export_tka_workers_csv(self) -> str:
+        """Export TKA workers to CSV format"""
+        workers = self.session.query(TkaWorker).filter(
+            TkaWorker.is_active == True
+        ).all()
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow(['ID', 'Name', 'Passport', 'Division', 'Gender'])
+        
+        # Write data with safe string conversion
+        for worker in workers:
+            # Handle division field that might be None
+            division_str = safe_string_conversion(worker.divisi) if safe_bool_check(worker.divisi) else ''
+            
+            writer.writerow([
+                safe_string_conversion(worker.id),
+                safe_string_conversion(worker.nama),
+                safe_string_conversion(worker.passport),
+                division_str,
+                safe_string_conversion(worker.jenis_kelamin)
+            ])
+        
+        return output.getvalue()
+    
+    def export_invoice_summary_csv(self, start_date: Optional[date] = None, 
+                                  end_date: Optional[date] = None) -> str:
+        """Export invoice summary to CSV format"""
+        query = self.session.query(Invoice).join(Company)
+        
+        if start_date:
+            query = query.filter(Invoice.invoice_date >= start_date)
+        if end_date:
+            query = query.filter(Invoice.invoice_date <= end_date)
+        
+        invoices = query.order_by(desc(Invoice.invoice_date)).all()
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'Invoice Number', 'Company Name', 'Invoice Date', 
+            'Subtotal', 'VAT Amount', 'Total Amount', 'Status'
+        ])
+        
+        # Write data with safe conversions
+        for invoice in invoices:
+            writer.writerow([
+                safe_string_conversion(invoice.invoice_number),
+                safe_string_conversion(invoice.company.company_name),
+                safe_string_conversion(invoice.invoice_date),
+                safe_string_conversion(invoice.get_subtotal_as_decimal()),
+                safe_string_conversion(invoice.get_vat_amount_as_decimal()),
+                safe_string_conversion(invoice.get_total_amount_as_decimal()),
+                safe_string_conversion(invoice.status)
+            ])
+        
+        return output.getvalue()
 
 if __name__ == "__main__":
     # Test business logic components
@@ -575,13 +748,14 @@ if __name__ == "__main__":
     
     from models.database import get_db_session
     
+    session = None
     try:
         session = get_db_session()
         
         # Test invoice business logic
         invoice_logic = InvoiceBusinessLogic(session)
         
-        # Test VAT calculation
+        # Test VAT calculation with proper Decimal values
         vat_49 = invoice_logic.calculate_vat_amount(Decimal('163.58'), Decimal('11'))
         vat_50 = invoice_logic.calculate_vat_amount(Decimal('163.64'), Decimal('11'))
         
@@ -598,10 +772,10 @@ if __name__ == "__main__":
         vat_rate = settings_helper.get_default_vat_percentage()
         print(f"Default VAT rate: {vat_rate}%")
         
-        session.close()
         print("✅ Business logic test completed")
         
     except Exception as e:
         print(f"❌ Business logic test failed: {e}")
-        if 'session' in locals():
+    finally:
+        if session:
             session.close()
