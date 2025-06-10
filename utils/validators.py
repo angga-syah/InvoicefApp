@@ -4,53 +4,18 @@ Comprehensive validation functions for all business entities and operations.
 """
 
 import re
-from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
-from typing import List, Dict, Any, Optional, Tuple, Union
+from datetime import date, datetime
+from decimal import Decimal
+from typing import List, Dict, Any, Optional, Tuple
 import logging
+
+from utils.helpers import safe_decimal, clean_string
 
 logger = logging.getLogger(__name__)
 
-# ========== HELPER FUNCTIONS ==========
-
-def safe_decimal(value: Any) -> Decimal:
-    """Safely convert value to Decimal"""
-    if value is None:
-        return Decimal('0')
-    
-    if isinstance(value, Decimal):
-        return value
-    
-    if isinstance(value, (int, float)):
-        return Decimal(str(value))
-    
-    if isinstance(value, str):
-        # Remove common formatting
-        cleaned = value.strip().replace(',', '').replace(' ', '')
-        if not cleaned:
-            return Decimal('0')
-        
-        try:
-            return Decimal(cleaned)
-        except InvalidOperation:
-            raise ValueError(f"Cannot convert '{value}' to decimal")
-    
-    raise ValueError(f"Cannot convert {type(value)} to decimal")
-
-def clean_string(value: Any) -> str:
-    """Clean and normalize string value"""
-    if value is None:
-        return ""
-    
-    if not isinstance(value, str):
-        value = str(value)
-    
-    # Remove extra whitespace and normalize
-    return " ".join(value.strip().split())
-
 class ValidationError(Exception):
     """Custom exception for validation errors"""
-    def __init__(self, message: str, field: Optional[str] = None, code: Optional[str] = None):
+    def __init__(self, message: str, field: str = None, code: str = None):
         self.message = message
         self.field = field
         self.code = code
@@ -63,21 +28,21 @@ class ValidationResult:
         self.errors: List[Dict[str, str]] = []
         self.warnings: List[Dict[str, str]] = []
     
-    def add_error(self, message: str, field: Optional[str] = None, code: Optional[str] = None):
+    def add_error(self, message: str, field: str = None, code: str = None):
         """Add validation error"""
         self.is_valid = False
         self.errors.append({
             'message': message,
-            'field': field or "",
-            'code': code or ""
+            'field': field,
+            'code': code
         })
     
-    def add_warning(self, message: str, field: Optional[str] = None, code: Optional[str] = None):
+    def add_warning(self, message: str, field: str = None, code: str = None):
         """Add validation warning"""
         self.warnings.append({
             'message': message,
-            'field': field or "",
-            'code': code or ""
+            'field': field,
+            'code': code
         })
     
     def get_first_error(self) -> Optional[str]:
@@ -99,13 +64,10 @@ def validate_required(value: Any, field_name: str = "Field") -> ValidationResult
     
     return result
 
-def validate_string_length(value: str, min_length: int = 0, max_length: Optional[int] = None, 
+def validate_string_length(value: str, min_length: int = 0, max_length: int = None, 
                           field_name: str = "Field") -> ValidationResult:
     """Validate string length constraints"""
     result = ValidationResult()
-    
-    if value is None:
-        return result
     
     if not isinstance(value, str):
         result.add_error(f"{field_name} must be a string", field_name.lower(), "invalid_type")
@@ -127,14 +89,10 @@ def validate_string_length(value: str, min_length: int = 0, max_length: Optional
     
     return result
 
-def validate_numeric_range(value: Any, min_value: Optional[Decimal] = None, 
-                          max_value: Optional[Decimal] = None,
+def validate_numeric_range(value: Any, min_value: Decimal = None, max_value: Decimal = None,
                           field_name: str = "Field") -> ValidationResult:
     """Validate numeric value within range"""
     result = ValidationResult()
-    
-    if value is None:
-        return result
     
     try:
         decimal_value = safe_decimal(value)
@@ -160,9 +118,6 @@ def validate_positive_number(value: Any, field_name: str = "Field",
                            allow_zero: bool = False) -> ValidationResult:
     """Validate that number is positive"""
     result = ValidationResult()
-    
-    if value is None:
-        return result
     
     try:
         decimal_value = safe_decimal(value)
@@ -258,9 +213,6 @@ def validate_gender(gender: str, field_name: str = "Gender") -> ValidationResult
     """Validate gender value"""
     result = ValidationResult()
     
-    if not gender:
-        return result
-    
     valid_genders = ['Laki-laki', 'Perempuan']
     
     if gender not in valid_genders:
@@ -274,9 +226,6 @@ def validate_gender(gender: str, field_name: str = "Gender") -> ValidationResult
 def validate_relationship(relationship: str, field_name: str = "Relationship") -> ValidationResult:
     """Validate family relationship value"""
     result = ValidationResult()
-    
-    if not relationship:
-        return result
     
     valid_relationships = ['spouse', 'parent', 'child']
     
@@ -292,9 +241,6 @@ def validate_invoice_status(status: str, field_name: str = "Status") -> Validati
     """Validate invoice status value"""
     result = ValidationResult()
     
-    if not status:
-        return result
-    
     valid_statuses = ['draft', 'finalized', 'paid', 'cancelled']
     
     if status not in valid_statuses:
@@ -308,9 +254,6 @@ def validate_invoice_status(status: str, field_name: str = "Status") -> Validati
 def validate_vat_percentage(percentage: Any, field_name: str = "VAT Percentage") -> ValidationResult:
     """Validate VAT percentage value"""
     result = ValidationResult()
-    
-    if percentage is None:
-        return result
     
     try:
         decimal_value = safe_decimal(percentage)
@@ -515,19 +458,13 @@ def validate_invoice_data(invoice_data: Dict[str, Any]) -> ValidationResult:
     if invoice_date:
         if isinstance(invoice_date, str):
             try:
-                parsed_date = datetime.strptime(invoice_date, '%Y-%m-%d').date()
+                datetime.strptime(invoice_date, '%Y-%m-%d')
             except ValueError:
                 result.add_error("Invoice date must be in YYYY-MM-DD format", "invoice_date", "invalid_date")
-                parsed_date = None
         elif isinstance(invoice_date, date):
-            parsed_date = invoice_date
-        else:
-            result.add_error("Invoice date must be a valid date", "invoice_date", "invalid_date")
-            parsed_date = None
-            
-        # Check if date is not too far in the future
-        if parsed_date and parsed_date > date.today() + timedelta(days=30):
-            result.add_warning("Invoice date is more than 30 days in the future", "invoice_date", "future_date")
+            # Check if date is not too far in the future
+            if invoice_date > date.today() + timedelta(days=30):
+                result.add_warning("Invoice date is more than 30 days in the future", "invoice_date", "future_date")
     
     # VAT percentage validation
     vat_percentage = invoice_data.get('vat_percentage')
@@ -551,7 +488,7 @@ def validate_invoice_line_data(line_data: Dict[str, Any]) -> ValidationResult:
     result = ValidationResult()
     
     # Required fields
-    required_fields = ['tka_id', 'job_description_id', 'unit_price', 'quantity']
+    required_fields = ['invoice_id', 'tka_id', 'job_description_id', 'unit_price', 'quantity']
     for field in required_fields:
         field_result = validate_required(line_data.get(field), field.replace('_', ' ').title())
         if not field_result.is_valid:

@@ -16,10 +16,6 @@ from datetime import datetime
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
-# Set high DPI environment variables before PyQt6 import
-os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
-
 # PyQt6 imports
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
@@ -173,6 +169,11 @@ class InvoiceApplication(QApplication):
     def _setup_application(self):
         """Setup application properties and style"""
         try:
+            # High DPI support
+            if ui_config.high_dpi_scaling:
+                self.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+                self.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+            
             # Set default font
             font = QFont(ui_config.default_font, ui_config.default_font_size)
             self.setFont(font)

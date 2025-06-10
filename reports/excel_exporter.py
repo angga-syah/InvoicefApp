@@ -17,6 +17,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.chart import BarChart, LineChart, PieChart, Reference
 from openpyxl.chart.axis import DateAxis
 from openpyxl.formatting.rule import DataBarRule
+from openpyxl.drawing import Image
 
 from models.database import Invoice, Company, TkaWorker
 from services.invoice_service import InvoiceService
