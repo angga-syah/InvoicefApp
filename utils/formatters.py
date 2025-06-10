@@ -411,7 +411,7 @@ def format_status_badge_class(status: str) -> str:
 
 # ========== TABLE FORMATTERS ==========
 
-def format_table_cell(value: any, cell_type: str = 'text', max_length: int = 50) -> str:
+def format_table_cell(value, cell_type: str = 'text', max_length: int = 50) -> str:
     """Format value for table cell display"""
     if value is None:
         return ""
@@ -527,12 +527,19 @@ def format_validation_errors(errors: list) -> str:
         return ""
     
     if len(errors) == 1:
-        return errors[0].get('message', str(errors[0]))
+        error_item = errors[0]
+        if isinstance(error_item, dict):
+            return error_item.get('message', str(error_item))
+        else:
+            return str(error_item)
     
     # Multiple errors
     formatted_errors = []
     for i, error in enumerate(errors, 1):
-        message = error.get('message', str(error))
+        if isinstance(error, dict):
+            message = error.get('message', str(error))
+        else:
+            message = str(error)
         formatted_errors.append(f"{i}. {message}")
     
     return '\n'.join(formatted_errors)

@@ -1,33 +1,43 @@
 # Core GUI Framework
 PyQt6==6.9.0
 PyQt6-tools==6.4.2.3.3
+
 # Database and ORM
 SQLAlchemy==2.0.41
 psycopg2-binary==2.9.10
+
 # Data Processing and Analysis
 pandas==2.3.0
 numpy>=2.2.0
+
 # File Handling
 openpyxl==3.1.5
+
 # PDF Generation and Reports
 reportlab==4.4.1
 pillow>=11.0.0
+
 # Web and HTTP
 requests==2.32.3
+
 # Security and Authentication
 bcrypt==4.3.0
+
 # Configuration Management
 python-dotenv==1.1.0
+pydantic==2.11.5
 pydantic-settings==2.6.1
+
 # Text Processing
 num2words==0.5.14
 fuzzywuzzy==0.18.0
 python-Levenshtein==0.25.0
-# Data Validation
-pydantic==2.11.5
+
 # Caching (Redis)
 redis==6.2.0
+
 # Build Tools
 setuptools==80.9.0
+
 # Text Encoding Detection
 chardet>=5.0.0

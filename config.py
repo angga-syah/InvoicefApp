@@ -8,7 +8,8 @@ import os
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings
 import logging
 
 # Load environment variables from .env file
@@ -17,15 +18,17 @@ load_dotenv()
 class DatabaseConfig(BaseSettings):
     """Database configuration settings"""
     
-    host: str = Field(default="localhost", env="DB_HOST")
-    port: int = Field(default=5432, env="DB_PORT")
-    name: str = Field(default="invoice_management", env="DB_NAME")
-    user: str = Field(default="postgres", env="DB_USER")
-    password: str = Field(default="", env="DB_PASSWORD")
-    pool_size: int = Field(default=20, env="DB_POOL_SIZE")
-    max_overflow: int = Field(default=30, env="DB_MAX_OVERFLOW")
-    pool_timeout: int = Field(default=30, env="DB_POOL_TIMEOUT")
-    pool_recycle: int = Field(default=3600, env="DB_POOL_RECYCLE")
+    host: str = Field(default="localhost", description="Database host")
+    port: int = Field(default=5432, description="Database port")
+    name: str = Field(default="invoice_management", description="Database name")
+    user: str = Field(default="postgres", description="Database user")
+    password: str = Field(default="", description="Database password")
+    pool_size: int = Field(default=20, description="Connection pool size")
+    max_overflow: int = Field(default=30, description="Max pool overflow")
+    pool_timeout: int = Field(default=30, description="Pool timeout")
+    pool_recycle: int = Field(default=3600, description="Pool recycle time")
+    
+    model_config = {"env_prefix": "DB_"}
     
     @property
     def url(self) -> str:
@@ -40,35 +43,40 @@ class DatabaseConfig(BaseSettings):
 class AppConfig(BaseSettings):
     """Main application configuration"""
     
-    name: str = Field(default="Invoice Management System", env="APP_NAME")
-    version: str = Field(default="1.0.0", env="APP_VERSION")
-    debug: bool = Field(default=False, env="DEBUG_MODE")
-    secret_key: str = Field(default="change-this-secret-key", env="SECRET_KEY")
-    session_timeout: int = Field(default=3600, env="SESSION_TIMEOUT")
+    name: str = Field(default="Invoice Management System", description="Application name")
+    version: str = Field(default="1.0.0", description="Application version")
+    debug: bool = Field(default=False, description="Debug mode")
+    secret_key: str = Field(default="change-this-secret-key", description="Secret key")
+    session_timeout: int = Field(default=3600, description="Session timeout")
     
     # Business configuration
-    default_vat_percentage: float = Field(default=11.00, env="DEFAULT_VAT_PERCENTAGE")
-    invoice_number_format: str = Field(default="INV-{YY}-{MM}-{NNN}", env="INVOICE_NUMBER_FORMAT")
-    company_tagline: str = Field(default="Spirit of Services", env="COMPANY_TAGLINE")
-    default_currency: str = Field(default="IDR", env="DEFAULT_CURRENCY")
+    default_vat_percentage: float = Field(default=11.00, description="Default VAT percentage")
+    invoice_number_format: str = Field(default="INV-{YY}-{MM}-{NNN}", description="Invoice number format")
+    company_tagline: str = Field(default="Spirit of Services", description="Company tagline")
+    default_currency: str = Field(default="IDR", description="Default currency")
     
     # Office information
-    office_address_line1: str = Field(default="Jakarta Office", env="OFFICE_ADDRESS_LINE1")
-    office_address_line2: str = Field(default="Indonesia", env="OFFICE_ADDRESS_LINE2")
-    office_phone: str = Field(default="+62-21-XXXXXXX", env="OFFICE_PHONE")
-    office_email: str = Field(default="info@company.com", env="OFFICE_EMAIL")
+    office_address_line1: str = Field(default="Jakarta Office", description="Office address line 1")
+    office_address_line2: str = Field(default="Indonesia", description="Office address line 2")
+    office_phone: str = Field(default="+62-21-XXXXXXX", description="Office phone")
+    office_email: str = Field(default="info@company.com", description="Office email")
+
+    model_config = {"env_prefix": "APP_"}
 
 class UIConfig(BaseSettings):
     """User interface configuration"""
     
-    default_theme: str = Field(default="light", env="DEFAULT_THEME")
-    animation_duration: int = Field(default=200, env="ANIMATION_DURATION")
-    window_remember_geometry: bool = Field(default=True, env="WINDOW_REMEMBER_GEOMETRY")
-    high_dpi_scaling: bool = Field(default=True, env="HIGH_DPI_SCALING")
-    default_font: str = Field(default="Segoe UI", env="DEFAULT_FONT")
-    default_font_size: int = Field(default=9, env="DEFAULT_FONT_SIZE")
+    default_theme: str = Field(default="light", description="Default theme")
+    animation_duration: int = Field(default=200, description="Animation duration")
+    window_remember_geometry: bool = Field(default=True, description="Remember window geometry")
+    high_dpi_scaling: bool = Field(default=True, description="High DPI scaling")
+    default_font: str = Field(default="Segoe UI", description="Default font")
+    default_font_size: int = Field(default=9, description="Default font size")
     
-    @validator('default_theme')
+    model_config = {"env_prefix": "UI_"}
+    
+    @field_validator('default_theme')
+    @classmethod
     def validate_theme(cls, v):
         valid_themes = ['light', 'dark']
         if v not in valid_themes:
@@ -78,20 +86,24 @@ class UIConfig(BaseSettings):
 class PerformanceConfig(BaseSettings):
     """Performance optimization configuration"""
     
-    cache_size: int = Field(default=1000, env="CACHE_SIZE")
-    search_debounce_ms: int = Field(default=300, env="SEARCH_DEBOUNCE_MS")
-    max_search_results: int = Field(default=50, env="MAX_SEARCH_RESULTS")
-    auto_save_interval: int = Field(default=30, env="AUTO_SAVE_INTERVAL")
-    backup_interval: int = Field(default=3600, env="BACKUP_INTERVAL")
+    cache_size: int = Field(default=1000, description="Cache size")
+    search_debounce_ms: int = Field(default=300, description="Search debounce milliseconds")
+    max_search_results: int = Field(default=50, description="Max search results")
+    auto_save_interval: int = Field(default=30, description="Auto save interval")
+    backup_interval: int = Field(default=3600, description="Backup interval")
+
+    model_config = {"env_prefix": "PERF_"}
 
 class RedisConfig(BaseSettings):
     """Redis cache configuration"""
     
-    enabled: bool = Field(default=False, env="REDIS_ENABLED")
-    host: str = Field(default="localhost", env="REDIS_HOST")
-    port: int = Field(default=6379, env="REDIS_PORT")
-    db: int = Field(default=0, env="REDIS_DB")
-    password: Optional[str] = Field(default=None, env="REDIS_PASSWORD")
+    enabled: bool = Field(default=False, description="Redis enabled")
+    host: str = Field(default="localhost", description="Redis host")
+    port: int = Field(default=6379, description="Redis port")
+    db: int = Field(default=0, description="Redis database")
+    password: Optional[str] = Field(default=None, description="Redis password")
+    
+    model_config = {"env_prefix": "REDIS_"}
     
     @property
     def url(self) -> str:
@@ -103,13 +115,16 @@ class RedisConfig(BaseSettings):
 class LoggingConfig(BaseSettings):
     """Logging configuration"""
     
-    level: str = Field(default="INFO", env="LOG_LEVEL")
-    file_max_size: int = Field(default=10485760, env="LOG_FILE_MAX_SIZE")  # 10MB
-    file_backup_count: int = Field(default=5, env="LOG_FILE_BACKUP_COUNT")
-    to_console: bool = Field(default=True, env="LOG_TO_CONSOLE")
-    to_file: bool = Field(default=True, env="LOG_TO_FILE")
+    level: str = Field(default="INFO", description="Log level")
+    file_max_size: int = Field(default=10485760, description="Log file max size")  # 10MB
+    file_backup_count: int = Field(default=5, description="Log file backup count")
+    to_console: bool = Field(default=True, description="Log to console")
+    to_file: bool = Field(default=True, description="Log to file")
     
-    @validator('level')
+    model_config = {"env_prefix": "LOG_"}
+    
+    @field_validator('level')
+    @classmethod
     def validate_log_level(cls, v):
         valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         if v.upper() not in valid_levels:
@@ -119,29 +134,35 @@ class LoggingConfig(BaseSettings):
 class SecurityConfig(BaseSettings):
     """Security configuration"""
     
-    password_min_length: int = Field(default=8, env="PASSWORD_MIN_LENGTH")
-    password_require_special_chars: bool = Field(default=True, env="PASSWORD_REQUIRE_SPECIAL_CHARS")
-    remember_login: bool = Field(default=True, env="REMEMBER_LOGIN")
-    max_login_attempts: int = Field(default=5, env="MAX_LOGIN_ATTEMPTS")
-    lockout_duration: int = Field(default=300, env="LOCKOUT_DURATION")
+    password_min_length: int = Field(default=8, description="Password min length")
+    password_require_special_chars: bool = Field(default=True, description="Password require special chars")
+    remember_login: bool = Field(default=True, description="Remember login")
+    max_login_attempts: int = Field(default=5, description="Max login attempts")
+    lockout_duration: int = Field(default=300, description="Lockout duration")
+
+    model_config = {"env_prefix": "SEC_"}
 
 class ExportConfig(BaseSettings):
     """Export and printing configuration"""
     
-    export_directory: str = Field(default="./exports", env="EXPORT_DIRECTORY")
-    pdf_compression: bool = Field(default=True, env="PDF_COMPRESSION")
-    pdf_quality: str = Field(default="high", env="PDF_QUALITY")
-    paper_size: str = Field(default="letter", env="PAPER_SIZE")
-    print_margins: int = Field(default=20, env="PRINT_MARGINS")
-    excel_include_formulas: bool = Field(default=True, env="EXCEL_INCLUDE_FORMULAS")
+    export_directory: str = Field(default="./exports", description="Export directory")
+    pdf_compression: bool = Field(default=True, description="PDF compression")
+    pdf_quality: str = Field(default="high", description="PDF quality")
+    paper_size: str = Field(default="letter", description="Paper size")
+    print_margins: int = Field(default=20, description="Print margins")
+    excel_include_formulas: bool = Field(default=True, description="Excel include formulas")
+
+    model_config = {"env_prefix": "EXPORT_"}
 
 class BackupConfig(BaseSettings):
     """Backup configuration"""
     
-    enabled: bool = Field(default=True, env="BACKUP_ENABLED")
-    directory: str = Field(default="./backups", env="BACKUP_DIRECTORY")
-    retention_days: int = Field(default=30, env="BACKUP_RETENTION_DAYS")
-    auto_backup_enabled: bool = Field(default=True, env="AUTO_BACKUP_ENABLED")
+    enabled: bool = Field(default=True, description="Backup enabled")
+    directory: str = Field(default="./backups", description="Backup directory")
+    retention_days: int = Field(default=30, description="Backup retention days")
+    auto_backup_enabled: bool = Field(default=True, description="Auto backup enabled")
+
+    model_config = {"env_prefix": "BACKUP_"}
 
 class Config:
     """Main configuration class that combines all configuration sections"""

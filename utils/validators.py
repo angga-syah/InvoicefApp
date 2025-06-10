@@ -4,7 +4,7 @@ Comprehensive validation functions for all business entities and operations.
 """
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import List, Dict, Any, Optional, Tuple
 import logging
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class ValidationError(Exception):
     """Custom exception for validation errors"""
-    def __init__(self, message: str, field: str = None, code: str = None):
+    def __init__(self, message: str, field: Optional[str] = None, code: Optional[str] = None):
         self.message = message
         self.field = field
         self.code = code
@@ -28,21 +28,21 @@ class ValidationResult:
         self.errors: List[Dict[str, str]] = []
         self.warnings: List[Dict[str, str]] = []
     
-    def add_error(self, message: str, field: str = None, code: str = None):
+    def add_error(self, message: str, field: Optional[str] = None, code: Optional[str] = None):
         """Add validation error"""
         self.is_valid = False
         self.errors.append({
             'message': message,
-            'field': field,
-            'code': code
+            'field': field or "",
+            'code': code or ""
         })
     
-    def add_warning(self, message: str, field: str = None, code: str = None):
+    def add_warning(self, message: str, field: Optional[str] = None, code: Optional[str] = None):
         """Add validation warning"""
         self.warnings.append({
             'message': message,
-            'field': field,
-            'code': code
+            'field': field or "",
+            'code': code or ""
         })
     
     def get_first_error(self) -> Optional[str]:
@@ -51,7 +51,7 @@ class ValidationResult:
     
     def get_errors_by_field(self, field: str) -> List[str]:
         """Get all errors for specific field"""
-        return [error['message'] for error in self.errors if error['field'] == field]
+        return [error['message'] for error in self.errors if error.get('field') == field]
 
 # ========== BASIC VALIDATORS ==========
 
@@ -64,7 +64,7 @@ def validate_required(value: Any, field_name: str = "Field") -> ValidationResult
     
     return result
 
-def validate_string_length(value: str, min_length: int = 0, max_length: int = None, 
+def validate_string_length(value: str, min_length: int = 0, max_length: Optional[int] = None, 
                           field_name: str = "Field") -> ValidationResult:
     """Validate string length constraints"""
     result = ValidationResult()
@@ -81,7 +81,7 @@ def validate_string_length(value: str, min_length: int = 0, max_length: int = No
             field_name.lower(), "too_short"
         )
     
-    if max_length and length > max_length:
+    if max_length is not None and length > max_length:
         result.add_error(
             f"{field_name} cannot exceed {max_length} characters", 
             field_name.lower(), "too_long"
@@ -89,7 +89,7 @@ def validate_string_length(value: str, min_length: int = 0, max_length: int = No
     
     return result
 
-def validate_numeric_range(value: Any, min_value: Decimal = None, max_value: Decimal = None,
+def validate_numeric_range(value: Any, min_value: Optional[Decimal] = None, max_value: Optional[Decimal] = None,
                           field_name: str = "Field") -> ValidationResult:
     """Validate numeric value within range"""
     result = ValidationResult()
