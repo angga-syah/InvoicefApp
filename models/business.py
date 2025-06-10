@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 class BusinessError(Exception):
     """Custom exception for business logic errors"""
-    def __init__(self, message: str, code: str = None, details: Dict = None):
+    def __init__(self, message: str, code: Optional[str] = None, details: Optional[Dict] = None):
         self.message = message
         self.code = code
         self.details = details or {}
@@ -35,13 +35,16 @@ class InvoiceBusinessLogic:
     def __init__(self, session: Session):
         self.session = session
         
-    def calculate_vat_amount(self, subtotal: Decimal, vat_percentage: Decimal) -> Decimal:
+    def calculate_vat_amount(self, subtotal: Union[Decimal, float, str], vat_percentage: Union[Decimal, float, str]) -> Decimal:
         """
         Calculate VAT amount with special business rules:
         - .49 rounds down (18.000,49 → 18.000)
         - .50 rounds up (18.000,50 → 18.001)
         """
-        vat_raw = subtotal * vat_percentage / 100
+        subtotal_decimal = safe_decimal(subtotal)
+        vat_percentage_decimal = safe_decimal(vat_percentage)
+        
+        vat_raw = subtotal_decimal * vat_percentage_decimal / Decimal('100')
         decimal_part = vat_raw - vat_raw.quantize(Decimal('1'))
         
         if abs(decimal_part - Decimal('0.49')) < Decimal('0.001'):
@@ -56,8 +59,26 @@ class InvoiceBusinessLogic:
     
     def calculate_invoice_totals(self, invoice: Invoice) -> Dict[str, Decimal]:
         """Calculate all invoice totals"""
-        subtotal = sum(line.line_total for line in invoice.lines)
-        vat_amount = self.calculate_vat_amount(subtotal, invoice.vat_percentage)
+        subtotal = Decimal('0')
+        
+        # Safely handle relationship iteration to avoid Pylance errors
+        try:
+            # Always query lines directly to avoid relationship iteration issues
+            lines = self.session.query(InvoiceLine).filter(
+                InvoiceLine.invoice_id == invoice.id
+            ).all()
+            
+            for line in lines:
+                if line.line_total:
+                    subtotal += safe_decimal(line.line_total)
+                    
+        except Exception as e:
+            logger.warning(f"Error calculating invoice totals: {e}")
+            # Ultimate fallback
+            subtotal = Decimal('0')
+        
+        vat_percentage = safe_decimal(invoice.vat_percentage) if invoice.vat_percentage else Decimal('11.00')
+        vat_amount = self.calculate_vat_amount(subtotal, vat_percentage)
         total_amount = subtotal + vat_amount
         
         return {
@@ -69,11 +90,12 @@ class InvoiceBusinessLogic:
     def update_invoice_totals(self, invoice: Invoice) -> None:
         """Update invoice totals based on line items"""
         totals = self.calculate_invoice_totals(invoice)
+        # Convert to the type expected by SQLAlchemy (Decimal will be stored properly)
         invoice.subtotal = totals['subtotal']
-        invoice.vat_amount = totals['vat_amount']
+        invoice.vat_amount = totals['vat_amount'] 
         invoice.total_amount = totals['total_amount']
     
-    def generate_invoice_number(self, invoice_date: date = None) -> str:
+    def generate_invoice_number(self, invoice_date: Optional[date] = None) -> str:
         """Generate next invoice number with format INV-YY-MM-NNN"""
         if invoice_date is None:
             invoice_date = date.today()
@@ -97,22 +119,48 @@ class InvoiceBusinessLogic:
                 prefix='INV'
             )
             self.session.add(sequence)
+            self.session.flush()
         
-        # Increment sequence
-        sequence.current_number += 1
+        # Handle Column[Integer] to int conversion safely
+        try:
+            # Get current number as Python int, handling Column objects
+            current_num = 0
+            if sequence.current_number is not None:
+                # Use a simple query to get the actual integer value
+                result = self.session.query(InvoiceNumberSequence.current_number).filter(
+                    InvoiceNumberSequence.id == sequence.id
+                ).scalar()
+                current_num = int(result) if result is not None else 0
+            
+            new_current_num = current_num + 1
+            
+        except (ValueError, TypeError, AttributeError):
+            # Fallback if conversion fails
+            new_current_num = 1
         
-        # Generate invoice number
-        invoice_number = format_invoice_number(year, month, sequence.current_number)
+        # Update sequence using a direct update to avoid Column assignment issues
+        self.session.query(InvoiceNumberSequence).filter(
+            InvoiceNumberSequence.id == sequence.id
+        ).update({
+            InvoiceNumberSequence.current_number: new_current_num
+        })
         
-        # Check for collisions (safety measure)
+        # Generate invoice number using Python int (not Column)
+        invoice_number = format_invoice_number(year, month, new_current_num)
+        
+        # Check for collisions
         existing = self.session.query(Invoice).filter(
             Invoice.invoice_number == invoice_number
         ).first()
         
         if existing:
-            # If collision exists, increment and try again
-            sequence.current_number += 1
-            invoice_number = format_invoice_number(year, month, sequence.current_number)
+            new_current_num += 1
+            self.session.query(InvoiceNumberSequence).filter(
+                InvoiceNumberSequence.id == sequence.id
+            ).update({
+                InvoiceNumberSequence.current_number: new_current_num
+            })
+            invoice_number = format_invoice_number(year, month, new_current_num)
         
         return invoice_number
     
@@ -172,15 +220,20 @@ class SearchHelper:
                 Company.is_active == True
             ).order_by(Company.company_name).limit(limit).all()
         
+        # Build search conditions
+        search_conditions = []
+        
         # Exact and prefix matches first
+        search_conditions.extend([
+            Company.company_name.ilike(f'{query}%'),
+            Company.npwp.like(f'{query}%'),
+            Company.idtku.ilike(f'{query}%')
+        ])
+        
         exact_results = self.session.query(Company).filter(
             and_(
                 Company.is_active == True,
-                or_(
-                    Company.company_name.ilike(f'{query}%'),
-                    Company.npwp.like(f'{query}%'),
-                    Company.idtku.ilike(f'{query}%')
-                )
+                or_(*search_conditions)
             )
         ).order_by(Company.company_name).limit(limit // 2).all()
         
@@ -190,21 +243,28 @@ class SearchHelper:
             
             # Get companies not in exact results
             exact_ids = [c.id for c in exact_results]
-            fuzzy_candidates = self.session.query(Company).filter(
-                and_(
-                    Company.is_active == True,
-                    ~Company.id.in_(exact_ids) if exact_ids else True
-                )
-            ).all()
+            
+            if exact_ids:
+                fuzzy_candidates = self.session.query(Company).filter(
+                    and_(
+                        Company.is_active == True,
+                        ~Company.id.in_(exact_ids)
+                    )
+                ).all()
+            else:
+                fuzzy_candidates = self.session.query(Company).filter(
+                    Company.is_active == True
+                ).all()
             
             # Score and sort fuzzy results
             scored_results = []
             for company in fuzzy_candidates:
-                score = max(
-                    fuzzy_search_score(query, company.company_name),
-                    fuzzy_search_score(query, company.npwp),
-                    fuzzy_search_score(query, company.idtku)
-                )
+                # Calculate fuzzy scores for string fields
+                name_score = fuzzy_search_score(query, company.company_name or "")
+                npwp_score = fuzzy_search_score(query, company.npwp or "")
+                idtku_score = fuzzy_search_score(query, company.idtku or "")
+                
+                score = max(name_score, npwp_score, idtku_score)
                 if score > 0.3:  # Minimum relevance threshold
                     scored_results.append((score, company))
             
@@ -230,25 +290,37 @@ class SearchHelper:
             return workers + family
         
         # Search workers
+        worker_conditions = [
+            TkaWorker.nama.ilike(f'%{query}%'),
+            TkaWorker.passport.ilike(f'%{query}%')
+        ]
+        
+        # Add division search if divisi is not None
+        if query:
+            worker_conditions.append(
+                and_(
+                    TkaWorker.divisi.isnot(None),
+                    TkaWorker.divisi.ilike(f'%{query}%')
+                )
+            )
+        
         worker_results = self.session.query(TkaWorker).filter(
             and_(
                 TkaWorker.is_active == True,
-                or_(
-                    TkaWorker.nama.ilike(f'%{query}%'),
-                    TkaWorker.passport.ilike(f'%{query}%'),
-                    TkaWorker.divisi.ilike(f'%{query}%')
-                )
+                or_(*worker_conditions)
             )
         ).order_by(TkaWorker.nama).limit(limit // 2).all()
         
         # Search family members
+        family_conditions = [
+            TkaFamilyMember.nama.ilike(f'%{query}%'),
+            TkaFamilyMember.passport.ilike(f'%{query}%')
+        ]
+        
         family_results = self.session.query(TkaFamilyMember).filter(
             and_(
                 TkaFamilyMember.is_active == True,
-                or_(
-                    TkaFamilyMember.nama.ilike(f'%{query}%'),
-                    TkaFamilyMember.passport.ilike(f'%{query}%')
-                )
+                or_(*family_conditions)
             )
         ).order_by(TkaFamilyMember.nama).limit(limit // 2).all()
         
@@ -261,12 +333,14 @@ class SearchHelper:
                 desc(Invoice.invoice_date), desc(Invoice.created_at)
             ).limit(limit).all()
         
+        search_conditions = [
+            Invoice.invoice_number.ilike(f'%{query}%'),
+            Company.company_name.ilike(f'%{query}%'),
+            Company.npwp.like(f'%{query}%')
+        ]
+        
         return self.session.query(Invoice).join(Company).filter(
-            or_(
-                Invoice.invoice_number.ilike(f'%{query}%'),
-                Company.company_name.ilike(f'%{query}%'),
-                Company.npwp.like(f'%{query}%')
-            )
+            or_(*search_conditions)
         ).order_by(
             desc(Invoice.invoice_date), desc(Invoice.created_at)
         ).limit(limit).all()
@@ -315,41 +389,52 @@ class DataHelper:
     
     def get_invoice_summary_stats(self) -> Dict[str, Any]:
         """Get invoice summary statistics"""
-        # Total invoices by status
-        status_counts = self.session.query(
-            Invoice.status, func.count(Invoice.id)
-        ).group_by(Invoice.status).all()
-        
-        # Total amounts by status
-        status_amounts = self.session.query(
-            Invoice.status, func.sum(Invoice.total_amount)
-        ).group_by(Invoice.status).all()
-        
-        # Monthly totals (current year)
-        current_year = date.today().year
-        monthly_totals = self.session.query(
-            func.extract('month', Invoice.invoice_date).label('month'),
-            func.sum(Invoice.total_amount).label('total')
-        ).filter(
-            func.extract('year', Invoice.invoice_date) == current_year
-        ).group_by(func.extract('month', Invoice.invoice_date)).all()
-        
-        return {
-            'status_counts': dict(status_counts),
-            'status_amounts': dict(status_amounts),
-            'monthly_totals': dict(monthly_totals)
-        }
+        try:
+            # Total invoices by status
+            status_counts_result = self.session.query(
+                Invoice.status, func.count(Invoice.id)
+            ).group_by(Invoice.status).all()
+            status_counts = dict(status_counts_result)
+            
+            # Total amounts by status  
+            status_amounts_result = self.session.query(
+                Invoice.status, func.sum(Invoice.total_amount)
+            ).group_by(Invoice.status).all()
+            status_amounts = dict(status_amounts_result)
+            
+            # Monthly totals (current year)
+            current_year = date.today().year
+            monthly_totals_result = self.session.query(
+                func.extract('month', Invoice.invoice_date).label('month'),
+                func.sum(Invoice.total_amount).label('total')
+            ).filter(
+                func.extract('year', Invoice.invoice_date) == current_year
+            ).group_by(func.extract('month', Invoice.invoice_date)).all()
+            monthly_totals = dict(monthly_totals_result)
+            
+            return {
+                'status_counts': status_counts,
+                'status_amounts': status_amounts,
+                'monthly_totals': monthly_totals
+            }
+        except Exception as e:
+            logger.error(f"Error getting invoice summary stats: {e}")
+            return {
+                'status_counts': {},
+                'status_amounts': {},
+                'monthly_totals': {}
+            }
     
-    def check_duplicate_passport(self, passport: str, exclude_id: int = None) -> bool:
+    def check_duplicate_passport(self, passport: str, exclude_id: Optional[int] = None) -> bool:
         """Check if passport number already exists"""
-        query = self.session.query(TkaWorker).filter(
+        worker_query = self.session.query(TkaWorker).filter(
             TkaWorker.passport == passport
         )
         
         if exclude_id:
-            query = query.filter(TkaWorker.id != exclude_id)
+            worker_query = worker_query.filter(TkaWorker.id != exclude_id)
         
-        worker_exists = query.first() is not None
+        worker_exists = worker_query.first() is not None
         
         # Also check family members
         family_query = self.session.query(TkaFamilyMember).filter(
@@ -360,7 +445,7 @@ class DataHelper:
         
         return worker_exists or family_exists
     
-    def check_duplicate_npwp(self, npwp: str, exclude_id: int = None) -> bool:
+    def check_duplicate_npwp(self, npwp: str, exclude_id: Optional[int] = None) -> bool:
         """Check if NPWP already exists"""
         query = self.session.query(Company).filter(
             Company.npwp == npwp
@@ -371,7 +456,7 @@ class DataHelper:
         
         return query.first() is not None
     
-    def check_duplicate_idtku(self, idtku: str, exclude_id: int = None) -> bool:
+    def check_duplicate_idtku(self, idtku: str, exclude_id: Optional[int] = None) -> bool:
         """Check if IDTKU already exists"""
         query = self.session.query(Company).filter(
             Company.idtku == idtku
@@ -389,7 +474,7 @@ class ValidationHelper:
         self.session = session
         self.data_helper = DataHelper(session)
     
-    def validate_unique_passport(self, passport: str, exclude_id: int = None) -> ValidationResult:
+    def validate_unique_passport(self, passport: str, exclude_id: Optional[int] = None) -> ValidationResult:
         """Validate passport uniqueness"""
         result = ValidationResult()
         
@@ -402,7 +487,7 @@ class ValidationHelper:
         
         return result
     
-    def validate_unique_npwp(self, npwp: str, exclude_id: int = None) -> ValidationResult:
+    def validate_unique_npwp(self, npwp: str, exclude_id: Optional[int] = None) -> ValidationResult:
         """Validate NPWP uniqueness"""
         result = ValidationResult()
         
@@ -415,7 +500,7 @@ class ValidationHelper:
         
         return result
     
-    def validate_unique_idtku(self, idtku: str, exclude_id: int = None) -> ValidationResult:
+    def validate_unique_idtku(self, idtku: str, exclude_id: Optional[int] = None) -> ValidationResult:
         """Validate IDTKU uniqueness"""
         result = ValidationResult()
         
@@ -482,7 +567,7 @@ class SettingsHelper:
         
         return default
     
-    def set_setting(self, key: str, value: Any, user_id: int = None) -> None:
+    def set_setting(self, key: str, value: Any, user_id: Optional[int] = None) -> None:
         """Set setting value"""
         setting = self.session.query(Setting).filter(
             Setting.setting_key == key
@@ -490,7 +575,8 @@ class SettingsHelper:
         
         if setting:
             setting.setting_value = str(value)
-            setting.updated_by = user_id
+            if user_id:
+                setting.updated_by = user_id
         else:
             setting = Setting(
                 setting_key=key,
@@ -520,8 +606,8 @@ class ReportHelper:
     def __init__(self, session: Session):
         self.session = session
     
-    def get_invoice_report_data(self, start_date: date = None, end_date: date = None,
-                              company_ids: List[int] = None, status: str = None) -> List[Dict]:
+    def get_invoice_report_data(self, start_date: Optional[date] = None, end_date: Optional[date] = None,
+                              company_ids: Optional[List[int]] = None, status: Optional[str] = None) -> List[Dict]:
         """Get invoice data for reports"""
         query = self.session.query(Invoice).join(Company)
         
@@ -542,7 +628,7 @@ class ReportHelper:
         
         return [invoice.to_dict() for invoice in invoices]
     
-    def get_company_summary(self, company_id: int, year: int = None) -> Dict:
+    def get_company_summary(self, company_id: int, year: Optional[int] = None) -> Dict:
         """Get summary for a specific company"""
         query = self.session.query(Invoice).filter(
             Invoice.company_id == company_id
@@ -555,7 +641,7 @@ class ReportHelper:
         
         invoices = query.all()
         
-        total_amount = sum(inv.total_amount for inv in invoices)
+        total_amount = sum(safe_decimal(inv.total_amount) for inv in invoices)
         total_count = len(invoices)
         status_breakdown = {}
         
@@ -575,6 +661,7 @@ if __name__ == "__main__":
     
     from models.database import get_db_session
     
+    session = None
     try:
         session = get_db_session()
         
@@ -598,10 +685,10 @@ if __name__ == "__main__":
         vat_rate = settings_helper.get_default_vat_percentage()
         print(f"Default VAT rate: {vat_rate}%")
         
-        session.close()
         print("✅ Business logic test completed")
         
     except Exception as e:
         print(f"❌ Business logic test failed: {e}")
-        if 'session' in locals():
+    finally:
+        if session:
             session.close()

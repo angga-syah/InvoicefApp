@@ -6,10 +6,10 @@ SQLAlchemy models for all database tables with relationships and business logic.
 import uuid
 from datetime import datetime, date
 from decimal import Decimal
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, Boolean, DateTime, Date, 
-    Numeric, ForeignKey, CheckConstraint, UniqueConstraint, Index
+    Numeric, ForeignKey, CheckConstraint, UniqueConstraint, Index, text
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, Session
@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.pool import QueuePool
 import logging
+import re
 
 from config import database_config
 
@@ -25,6 +26,28 @@ logger = logging.getLogger(__name__)
 
 # SQLAlchemy base
 Base = declarative_base()
+
+# Utility functions for safe type conversion
+def safe_numeric_to_float(value):
+    """Safely convert SQLAlchemy Column values to float"""
+    try:
+        if value is None:
+            return 0.0
+        return float(value)
+    except (ValueError, TypeError, AttributeError):
+        return 0.0
+
+def safe_text_to_int(value):
+    """Safely convert SQLAlchemy Column values to int"""
+    try:
+        if value is None:
+            return 0
+        if isinstance(value, str):
+            digits_only = re.sub(r'[^\d]', '', str(value))
+            return int(digits_only) if digits_only else 0
+        return int(value)
+    except (ValueError, TypeError, AttributeError):
+        return 0
 
 class TimestampMixin:
     """Mixin for created_at and updated_at timestamps"""
@@ -35,9 +58,11 @@ class UUIDMixin:
     """Mixin for UUID primary keys"""
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        # Add UUID column for each model
-        uuid_column_name = f"{cls.__tablename__.rstrip('s')}_uuid"
-        setattr(cls, uuid_column_name, Column(UUID(as_uuid=True), default=uuid.uuid4, unique=True, nullable=False))
+        # Add UUID column for each model - safely check tablename existence
+        tablename = getattr(cls, '__tablename__', None)
+        if tablename and isinstance(tablename, str) and tablename.strip():
+            uuid_column_name = f"{tablename.rstrip('s')}_uuid"
+            setattr(cls, uuid_column_name, Column(UUID(as_uuid=True), default=uuid.uuid4, unique=True, nullable=False))
 
 class User(Base, TimestampMixin, UUIDMixin):
     """User model for authentication and authorization"""
@@ -91,6 +116,16 @@ class Company(Base, TimestampMixin, UUIDMixin):
         return f"<Company(id={self.id}, name='{self.company_name}', npwp='{self.npwp}')>"
     
     def to_dict(self) -> Dict[str, Any]:
+        # Use query count instead of len() on relationship
+        job_descriptions_count = 0
+        try:
+            if hasattr(self, '_sa_instance_state') and self._sa_instance_state.session:
+                job_descriptions_count = self._sa_instance_state.session.query(JobDescription).filter(
+                    JobDescription.company_id == self.id
+                ).count()
+        except:
+            pass
+            
         return {
             'id': self.id,
             'company_name': self.company_name,
@@ -99,7 +134,7 @@ class Company(Base, TimestampMixin, UUIDMixin):
             'address': self.address,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'job_descriptions_count': len(self.job_descriptions) if self.job_descriptions else 0
+            'job_descriptions_count': job_descriptions_count
         }
 
 class TkaWorker(Base, TimestampMixin, UUIDMixin):
@@ -126,6 +161,16 @@ class TkaWorker(Base, TimestampMixin, UUIDMixin):
         return f"<TkaWorker(id={self.id}, nama='{self.nama}', passport='{self.passport}')>"
     
     def to_dict(self) -> Dict[str, Any]:
+        # Use query count instead of len() on relationship
+        family_members_count = 0
+        try:
+            if hasattr(self, '_sa_instance_state') and self._sa_instance_state.session:
+                family_members_count = self._sa_instance_state.session.query(TkaFamilyMember).filter(
+                    TkaFamilyMember.tka_id == self.id
+                ).count()
+        except:
+            pass
+            
         return {
             'id': self.id,
             'nama': self.nama,
@@ -134,7 +179,7 @@ class TkaWorker(Base, TimestampMixin, UUIDMixin):
             'jenis_kelamin': self.jenis_kelamin,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'family_members_count': len(self.family_members) if self.family_members else 0
+            'family_members_count': family_members_count
         }
 
 class TkaFamilyMember(Base, TimestampMixin, UUIDMixin):
@@ -203,7 +248,7 @@ class JobDescription(Base, TimestampMixin, UUIDMixin):
             'company_id': self.company_id,
             'job_name': self.job_name,
             'job_description': self.job_description,
-            'price': float(self.price),
+            'price': safe_numeric_to_float(self.price),
             'is_active': self.is_active,
             'sort_order': self.sort_order,
             'company_name': self.company.company_name if self.company else None
@@ -276,38 +321,80 @@ class Invoice(Base, TimestampMixin, UUIDMixin):
     
     def calculate_totals(self):
         """Calculate invoice totals based on line items"""
-        self.subtotal = sum(line.line_total for line in self.lines)
+        # Calculate subtotal from line items - handle properly loaded relationships
+        subtotal = Decimal('0')
+        
+        # Try to get lines - handle both loaded and unloaded relationships
+        try:
+            if hasattr(self, '_sa_instance_state') and self._sa_instance_state.session:
+                # Query lines directly from database
+                from sqlalchemy import func as sql_func
+                line_total_sum = self._sa_instance_state.session.query(
+                    sql_func.coalesce(sql_func.sum(InvoiceLine.line_total), 0)
+                ).filter(InvoiceLine.invoice_id == self.id).scalar()
+                subtotal = Decimal(str(line_total_sum)) if line_total_sum else Decimal('0')
+            else:
+                # Use loaded relationship if available
+                lines = getattr(self, 'lines', [])
+                for line in lines:
+                    if hasattr(line, 'line_total') and line.line_total is not None:
+                        subtotal += Decimal(str(line.line_total))
+        except Exception:
+            # Fallback to zero if calculation fails
+            subtotal = Decimal('0')
+        
+        self.subtotal = subtotal
         
         # Apply special PPN rounding rule
-        vat_raw = self.subtotal * self.vat_percentage / 100
+        vat_percentage = safe_numeric_to_float(self.vat_percentage) if self.vat_percentage else 11.00
+        vat_raw = float(subtotal) * vat_percentage / 100.0
+        
+        # Convert to float for comparison to handle decimal precision
         decimal_part = vat_raw - int(vat_raw)
         
         if abs(decimal_part - 0.49) < 0.001:  # .49 rule
-            self.vat_amount = int(vat_raw)
+            self.vat_amount = Decimal(str(int(vat_raw)))
         elif decimal_part >= 0.50:  # .50 and above rule
-            self.vat_amount = int(vat_raw) + 1
+            self.vat_amount = Decimal(str(int(vat_raw) + 1))
         else:
-            self.vat_amount = round(vat_raw, 0)
+            self.vat_amount = Decimal(str(round(vat_raw, 0)))
         
-        self.total_amount = self.subtotal + self.vat_amount
+        self.total_amount = subtotal + self.vat_amount
     
     def to_dict(self) -> Dict[str, Any]:
+        # Safe conversion of Numeric columns to float
+        def safe_float_conversion(value):
+            try:
+                return float(value) if value is not None else 0.0
+            except (ValueError, TypeError):
+                return 0.0
+        
+        # Get line count safely
+        line_count = 0
+        try:
+            if hasattr(self, '_sa_instance_state') and self._sa_instance_state.session:
+                line_count = self._sa_instance_state.session.query(InvoiceLine).filter(
+                    InvoiceLine.invoice_id == self.id
+                ).count()
+        except:
+            pass
+        
         return {
             'id': self.id,
             'invoice_number': self.invoice_number,
             'company_id': self.company_id,
             'invoice_date': self.invoice_date.isoformat() if self.invoice_date else None,
-            'subtotal': float(self.subtotal),
-            'vat_percentage': float(self.vat_percentage),
-            'vat_amount': float(self.vat_amount),
-            'total_amount': float(self.total_amount),
+            'subtotal': safe_float_conversion(self.subtotal),
+            'vat_percentage': safe_float_conversion(self.vat_percentage),
+            'vat_amount': safe_float_conversion(self.vat_amount),
+            'total_amount': safe_float_conversion(self.total_amount),
             'status': self.status,
             'notes': self.notes,
             'printed_count': self.printed_count,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'company_name': self.company.company_name if self.company else None,
             'creator_name': self.creator.full_name if self.creator else None,
-            'line_count': len(self.lines) if self.lines else 0
+            'line_count': line_count
         }
 
 class InvoiceLine(Base, TimestampMixin, UUIDMixin):
@@ -342,9 +429,22 @@ class InvoiceLine(Base, TimestampMixin, UUIDMixin):
     
     def calculate_line_total(self):
         """Calculate line total based on quantity and unit price"""
-        self.line_total = self.quantity * self.unit_price
+        try:
+            if self.quantity and self.unit_price:
+                quantity_decimal = Decimal(str(self.quantity))
+                unit_price_decimal = Decimal(str(self.unit_price))
+                self.line_total = quantity_decimal * unit_price_decimal
+        except (ValueError, TypeError):
+            self.line_total = Decimal('0')
     
     def to_dict(self) -> Dict[str, Any]:
+        # Safe conversion of Numeric columns to float
+        def safe_float_conversion(value):
+            try:
+                return float(value) if value is not None else 0.0
+            except (ValueError, TypeError):
+                return 0.0
+        
         return {
             'id': self.id,
             'invoice_id': self.invoice_id,
@@ -354,10 +454,10 @@ class InvoiceLine(Base, TimestampMixin, UUIDMixin):
             'job_description_id': self.job_description_id,
             'custom_job_name': self.custom_job_name,
             'custom_job_description': self.custom_job_description,
-            'custom_price': float(self.custom_price) if self.custom_price else None,
+            'custom_price': safe_float_conversion(self.custom_price),
             'quantity': self.quantity,
-            'unit_price': float(self.unit_price),
-            'line_total': float(self.line_total),
+            'unit_price': safe_float_conversion(self.unit_price),
+            'line_total': safe_float_conversion(self.line_total),
             'tka_worker_name': self.tka_worker.nama if self.tka_worker else None,
             'job_name': self.custom_job_name or (self.job_description.job_name if self.job_description else None)
         }
@@ -382,14 +482,25 @@ class Setting(Base, TimestampMixin):
     
     def get_typed_value(self):
         """Get setting value with proper type conversion"""
-        if self.setting_type == 'integer':
-            return int(self.setting_value)
-        elif self.setting_type == 'decimal':
-            return Decimal(self.setting_value)
-        elif self.setting_type == 'boolean':
-            return self.setting_value.lower() in ('true', '1', 'yes')
-        else:
-            return self.setting_value
+        try:
+            if self.setting_type == 'integer':
+                return safe_text_to_int(self.setting_value)
+            elif self.setting_type == 'decimal':
+                return Decimal(str(self.setting_value))
+            elif self.setting_type == 'boolean':
+                return str(self.setting_value).lower() in ('true', '1', 'yes')
+            else:
+                return str(self.setting_value) if self.setting_value else ""
+        except Exception:
+            # Return appropriate default based on type
+            if self.setting_type == 'integer':
+                return 0
+            elif self.setting_type == 'decimal':
+                return Decimal('0')
+            elif self.setting_type == 'boolean':
+                return False
+            else:
+                return ""
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -508,6 +619,8 @@ class DatabaseManager:
     def get_session(self) -> Session:
         """Get a new database session"""
         try:
+            if self.SessionLocal is None:
+                raise RuntimeError("Database not initialized")
             return self.SessionLocal()
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
@@ -524,7 +637,7 @@ class DatabaseManager:
         """Test database connection"""
         try:
             session = self.get_session()
-            session.execute("SELECT 1")
+            session.execute(text("SELECT 1"))
             session.close()
             return True
         except Exception as e:

@@ -6,6 +6,10 @@ PyQt6-tools==6.4.2.3.3
 SQLAlchemy==2.0.41
 psycopg2-binary==2.9.10
 
+# Type checking and stubs
+types-setuptools>=69.0.0
+sqlalchemy2-stubs>=0.0.2a38
+
 # Data Processing and Analysis
 pandas==2.3.0
 numpy>=2.2.0
@@ -41,3 +45,7 @@ setuptools==80.9.0
 
 # Text Encoding Detection
 chardet>=5.0.0
+
+# Development and Type Checking
+mypy>=1.8.0
+typing-extensions>=4.8.0
